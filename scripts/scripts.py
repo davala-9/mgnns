@@ -18,8 +18,8 @@ if __name__ == "__main__":
     derivation_threshold = "0.000000001"
     explanation_threshold = "0.1"
     non_negative_weights = "True"
-    train = False 
-    test = False 
+    train = True 
+    test = True 
     explain = True
 
 
