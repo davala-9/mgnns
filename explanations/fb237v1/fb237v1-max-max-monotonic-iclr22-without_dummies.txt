@@ -1,0 +1,9 @@
+('/m/0x67', '/award/award_winner/awards_won./award/award_honor/award_winner', '/m/09f0bj')
+</award/award_winner/awards_won./award/award_honor/award_winner>[?X1,?X2] :- </people/ethnicity/people>[?Y2,?X2], </award/award_winner/awards_won./award/award_honor/award_winner>[?X2,?Y1] .
+
+('/m/0k2mxq', '/award/award_winner/awards_won./award/award_honor/award_winner', '/m/09f0bj')
+</award/award_winner/awards_won./award/award_honor/award_winner>[?X1,?X2] :- </award/award_winner/awards_won./award/award_honor/award_winner>[?X2,?Y2], </people/ethnicity/people>[?Y1,?X2] .
+
+('/m/0js9s', '/award/award_nominee/award_nominations./award/award_nomination/nominated_for', '/m/017gl1')
+</award/award_nominee/award_nominations./award/award_nomination/nominated_for>[?X1,?X2] :- </film/director/film>[?X1,?X2], </film/film/genre>[?X2,?Y3], </award/award_category/nominees./award/award_nomination/nominated_for>[?Y2,?X2], </film/actor/film./film/performance/film>[?Y1,?X2], </award/award_winner/awards_won./award/award_honor/award_winner>[?Y7,?X1], </award/award_nominee/award_nominations./award/award_nomination/award_nominee>[?X1,?Y6], </award/award_winner/awards_won./award/award_honor/award_winner>[?X1,?Y5], </film/director/film>[?X1,?Y4], </award/award_winning_work/awards_won./award/award_honor/award_winner>[?X2,?X1] .
+

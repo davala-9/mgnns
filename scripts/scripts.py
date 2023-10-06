@@ -2,25 +2,34 @@ import subprocess
 
 if __name__ == "__main__":
 
-    mgnn_dir = "../src/"
-    exp_dir = "../"
+  
+    configuration = {}
+    for line in open('experiment.config').readlines():
+        parameter = line.split()[0]
+        if parameter == "dataset_names":
+            value = line.split()[2:]
+        else:
+            value = line.split()[2]
+        configuration[parameter] = value
+    mgnn_dir = configuration["mgnn_dir"]
+    exp_dir = configuration["exp_dir"]
+    experiment_type = configuration["experiment_type"]
+    dataset_names = configuration["dataset_names"]
+    train_graph = configuration["train_graph"] 
+    test_graph = configuration["test_graph"] 
+    use_dummy_constants = configuration["use_dummy_constants"]==True 
+    train_examples = configuration["train_examples"] 
+    test_positive_examples = configuration["test_positive_examples"] 
+    test_negative_examples = configuration["test_negative_examples"] 
+    encoding_scheme = configuration["encoding_scheme"]
+    aggregation = configuration["aggregation"] 
+    derivation_threshold = configuration["derivation_threshold"]
+    explanation_threshold = configuration["explanation_threshold"] 
+    non_negative_weights = configuration["non_negative_weights"]
+    train = configuration["train"]=="True" 
+    test = configuration["test"]=="True" 
+    explain = configuration["explain"]=="True" 
 
-    experiment_type = "link_prediction"
-    dataset_names = ["fb237v1"]
-    train_graph = "train_graph.tsv"
-    test_graph = "test_graph.tsv" 
-    use_dummy_constants = True 
-    train_examples =  "train_pos.tsv"
-    test_positive_examples = "test_pos.tsv"
-    test_negative_examples = "test_neg.tsv"
-    encoding_scheme = "iclr22"      # canonical or iclr22
-    aggregation = "max-max"
-    derivation_threshold = "0.000000001"
-    explanation_threshold = "0.1"
-    non_negative_weights = "True"
-    train = True 
-    test = True 
-    explain = True
 
 
     if non_negative_weights == 'True':
