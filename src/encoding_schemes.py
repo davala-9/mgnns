@@ -278,81 +278,125 @@ class ICLREncoderDecoder:
     def get_data_predicate(self, canonical_predicate):
         return self.unary_canonical_to_input_predicate_dict[canonical_predicate]
 
-    # COME HERE!! Problem: if introducing new variables for pair node, one of them should match the one of the single
-    # node. Fix that.
-    def unfold(self, rule_body):
+    def associated_arity(self, canonical_predicate):
+        return self.data_predicate_to_arity[self.get_data_predicate(canonical_predicate)]
+
+    def unfold(self, rule_body, unary_head_predicate):
+
+        # each variable in the canonical rule represents a constant, and then it corresponds to a variable in the data
+        # rule, or it represents a pair of constants (but not both), in which case it corresponds to a pair of variables
+        # in the data. These are determined by either the rule head, or by the connections of this variable to others in
+        # the canonical rule
+        can_variables_to_data_variables = {}
+
+#       first, figure out the arity of the head variable, and assign corresponding variables in the data rule
+        if self.associated_arity(unary_head_predicate) == 1:
+            can_variables_to_data_variables["X1"] = ["X1"]
+        else:
+            can_variables_to_data_variables["X1"] = ["X1", "X2"]
+
+        # if we encounter a unary predicate U(y) with y a binary variable, and we don't know which variables it is
+        # associated to, we just delay processing it until the next round. This won't delay it indefinitely, since in
+        # each round we always get to define one additional variable.
+        this_round = []
+        next_round = rule_body
         new_body = []
-        nontop_bin_atoms = set()
-        top_bin_atoms = set()
-        variable_unification = {}
         new_variables_counter = 0
-        facts_for_c1_c2 = []
-        second_round = []
-        pair_var_to_first_var = {}
-        pair_var_to_second_var = {}
-        for (s, p, o) in rule_body:
-            if p == type_pred:
-                if self.data_predicate_to_arity[self.unary_canonical_to_input_predicate_dict[o]] == 1:
-                    if s in variable_unification:
-                        y1 = variable_unification[s]
+
+        while next_round:
+            this_round = next_round.copy()
+            next_round = []
+            for (s, p, o) in this_round:
+                if s in can_variables_to_data_variables:
+                    if p == type_pred:
+                        if self.associated_arity(o) == 1 and len(can_variables_to_data_variables[s]) == 1:
+                            # Fact of the form A(x) in the data rule
+                            new_body.append((can_variables_to_data_variables[s], type_pred, self.get_data_predicate(o)))
+                        elif self.associated_arity(o) == 2 and len(can_variables_to_data_variables[s]) == 2:
+                            # Fact of the form R(x,y) in the data rule
+                            new_body.append((can_variables_to_data_variables[s][0], self.get_data_predicate(o), can_variables_to_data_variables[s][1]))
+                        else:
+                            raise Exception("Error: arity of variable does not match arity of predicate.")
                     else:
-                        new_variables_counter += 1
-                        y1 = "Y{}".format(new_variables_counter)
-                        variable_unification[s] = y1
-                    new_body.append((y1, type_pred, self.unary_canonical_to_input_predicate_dict[o]))
-                else:
-                    second_round.append((s, p, o))
-            else:
-                # We need not generate anything from facts of colours 1-3,
-                # since the necessary fact is covered already by decoding c4.
-                # But we add them to a separate list since they will help us later.
-                if p == self. binary_canonical[1]:
-                    facts_for_c1_c2.append((s, p, o))
-                elif p == self.binary_canonical[2]:
-                    facts_for_c1_c2.append((s, p, o))
-                elif p == self.binary_canonical[4]:
-                    if s in variable_unification:
-                        y1 = variable_unification[s]
+                        if p == self.binary_canonical[1]:
+                            if len(can_variables_to_data_variables[s]) == 1:
+                                # Fact of the form Ec1(f(x),g(x,y)) in the canonical rule
+                                if o not in can_variables_to_data_variables:
+                                    new_variables_counter += 1
+                                    y = "Y{}".format(new_variables_counter)
+                                    can_variables_to_data_variables[o] = [can_variables_to_data_variables[s][0], y]
+                            else:
+                                # Fact of the form Ec1((g(x,y),f(x)) in the canonical rule
+                                if o not in can_variables_to_data_variables:
+                                    can_variables_to_data_variables[o] = [can_variables_to_data_variables[s][0]]
+                        elif p == self.binary_canonical[2]:
+                            if len(can_variables_to_data_variables[s]) == 1:
+                                # Fact of the form Ec2(f(x),g(y,x)) in the canonical rule
+                                if o not in can_variables_to_data_variables:
+                                    new_variables_counter += 1
+                                    y = "Y{}".format(new_variables_counter)
+                                    can_variables_to_data_variables[o] = [y, can_variables_to_data_variables[s][0]]
+                            else:
+                                # Fact of the form Ec2((g(x,y),f(y)) in the canonical rule
+                                if o not in can_variables_to_data_variables:
+                                    can_variables_to_data_variables[o] = [can_variables_to_data_variables[s][1]]
+                        elif p == self.binary_canonical[3]:
+                            # Fact of the form Ec3(g(x,y),g(y,x)) in the canonical rule
+                            assert len(can_variables_to_data_variables[s]) == 2
+                            if o not in can_variables_to_data_variables:
+                                can_variables_to_data_variables[o] = [can_variables_to_data_variables[s][1],
+                                                                      can_variables_to_data_variables[s][0]]
+                        elif p == self.binary_canonical[4]:
+                            # Fact of the form Ec4(f(x),f(y)) in the canonical rule
+                            assert len(can_variables_to_data_variables[s]) == 1
+                            if o not in can_variables_to_data_variables:
+                                new_variables_counter += 1
+                                y = "Y{}".format(new_variables_counter)
+                                can_variables_to_data_variables[o] = [y]
+                                new_body.append((s, "TOP", o))
+                        else:
+                            raise Exception("Error: binary predicate not corresponding to one of the four colours")
+                elif o in can_variables_to_data_variables:
+                    assert(p != type_pred)
+                    if p == self.binary_canonical[1]:
+                        if len(can_variables_to_data_variables[o]) == 1:
+                            # Fact of the form Ec1(g(x,y),f(x)) in the canonical rule
+                            if s not in can_variables_to_data_variables:
+                                new_variables_counter += 1
+                                y = "Y{}".format(new_variables_counter)
+                                can_variables_to_data_variables[s] = [can_variables_to_data_variables[o][0], y]
+                        else:
+                            # Fact of the form Ec1(f(x),g(x,y)) in the canonical rule
+                            if s not in can_variables_to_data_variables:
+                                can_variables_to_data_variables[s] = [can_variables_to_data_variables[o][0]]
+                    elif p == self.binary_canonical[2]:
+                        if len(can_variables_to_data_variables[o]) == 1:
+                            # Fact of the form Ec2((g(x,y),f(y))in the canonical rule
+                            if s not in can_variables_to_data_variables:
+                                new_variables_counter += 1
+                                y = "Y{}".format(new_variables_counter)
+                                can_variables_to_data_variables[s] = [y, can_variables_to_data_variables[o][0]]
+                        else:
+                            # Fact of the form Ec2(f(x),g(y,x))  in the canonical rule
+                            if s not in can_variables_to_data_variables:
+                                can_variables_to_data_variables[s] = [can_variables_to_data_variables[o][1]]
+                    elif p == self.binary_canonical[3]:
+                        # Fact of the form Ec3(g(x,y),g(y,x)) in the canonical rule
+                        assert len(can_variables_to_data_variables[o]) == 2
+                        if s not in can_variables_to_data_variables:
+                            can_variables_to_data_variables[s] = [can_variables_to_data_variables[o][1],
+                                                                  can_variables_to_data_variables[o][0]]
+                    elif p == self.binary_canonical[4]:
+                        # Fact of the form Ec4(f(x),f(y)) in the canonical rule
+                        assert len(can_variables_to_data_variables[o]) == 1
+                        if s not in can_variables_to_data_variables:
+                            new_variables_counter += 1
+                            y = "Y{}".format(new_variables_counter)
+                            can_variables_to_data_variables[s] = [y]
+                            new_body.append((o, "TOP", s))
                     else:
-                        new_variables_counter += 1
-                        y1 = "Y{}".format(new_variables_counter)
-                        variable_unification[s] = y1
-                    if o in variable_unification:
-                        y2 = variable_unification[o]
-                    else:
-                        new_variables_counter += 1
-                        y2 = "Y{}".format(new_variables_counter)
-                        variable_unification[o] = y2
-                    top_bin_atoms.add((y1, y2))
-        # The second round takes care of canonical facts involving terms for pairs of constants
-        for (s, p, o) in facts_for_c1_c2:
-            if p == self.binary_canonical[1]:
-               # Exactly one of the two variables (the one for a single term) should be in variable_unification
-                if s in variable_unification:
-                    pair_var_to_first_var[o] = variable_unification[s]
+                        raise Exception("Error: binary predicate not corresponding to one of the four colours")
                 else:
-                    pair_var_to_first_var[s] = variable_unification[o]
-            if p == self.binary_canonical[2]:
-                if s in variable_unification:
-                    pair_var_to_second_var[o] = variable_unification[s]
-                else:
-                    pair_var_to_second_var[s] = variable_unification[o]
-        for (s, p, o) in second_round:
-            assert s in pair_var_to_first_var or s in pair_var_to_second_var
-            if s not in pair_var_to_first_var:
-                new_variables_counter += 1
-                y1 = "Y{}".format(new_variables_counter)
-                pair_var_to_first_var[s] = y1
-            if s not in pair_var_to_second_var:
-                new_variables_counter += 1
-                y2 = "Y{}".format(new_variables_counter)
-                pair_var_to_second_var[s] = y2
-            y1 = pair_var_to_first_var[s]
-            y2 = pair_var_to_second_var[s]
-            new_body.append((y1, self.unary_canonical_to_input_predicate_dict[o], y2))
-            nontop_bin_atoms.add((y1, y2))
-        # Small optimisation to avoid adding TOP(x,y) if we already have R(x,y) for some R
-        for (s, o) in top_bin_atoms:
-            if (s, o) not in nontop_bin_atoms and (o, s) not in nontop_bin_atoms:
-                new_body.append((s, "TOP", o))
-        return new_body, variable_unification
+                    next_round.append((s, p, o))
+
+        return new_body, can_variables_to_data_variables

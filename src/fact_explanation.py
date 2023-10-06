@@ -407,19 +407,19 @@ if __name__ == "__main__":
             assert gnn_output_gr[node_to_gr_row_dict[nodes.const_node_dict["X1"]]][cd_fact_pred_pos] >= args.threshold, \
                 "ERROR: the extracted rule seems not to be captured by the model. This means there is a bug."
 
-        print(rule_body)
-
         # Unfold extracted rules with the encoder's rules
         if args.encoding_scheme == "iclr22":
-            rule_body, variable_unification = iclr_encoder_decoder.unfold(rule_body)
-            print(rule_body)
-            print(variable_unification)
-            variable_unification_reversed = { variable_unification[var]: var for var in variable_unification }
+            rule_body, can_variable_to_data_variable = iclr_encoder_decoder.unfold(rule_body, cd_fact_predicate)
+            # Then, get rid of the \TOP predicates by finding an appropriate predicate
+            data_variable_to_can_variable = {}
+            for s in can_variable_to_data_variable:
+                if len(can_variable_to_data_variable[s]) == 1:
+                    data_variable_to_can_variable[can_variable_to_data_variable[s][0]] = s
             new_rule_body = rule_body.copy()
             for (s, p, o) in rule_body:
                 if p == "TOP":
-                    x1 = variable_unification_reversed[s]
-                    x2 = variable_unification_reversed[o]
+                    x1 = data_variable_to_can_variable[s]
+                    x2 = data_variable_to_can_variable[o]
                     can_a = nodes.node_const_dict[nu_variable_to_node_dict[x1]]
                     can_b = nodes.node_const_dict[nu_variable_to_node_dict[x2]]
                     a, = iclr_encoder_decoder.term_tuple_dict[can_a]
@@ -452,18 +452,9 @@ if __name__ == "__main__":
             head = "<{}>[?X1]".format(cd_fact_predicate)
         else:
             if iclr_encoder_decoder.data_predicate_to_arity[iclr_encoder_decoder.unary_canonical_to_input_predicate_dict[cd_fact_predicate]] == 1:
-                if "X1" in variable_unification:
-                    y1 = variable_unification["X1"]
-                else:
-                    y1 = "Y"
-                head = "<{}>[?{}]".format(iclr_encoder_decoder.unary_canonical_to_input_predicate_dict[cd_fact_predicate], y1)
+                head = "<{}>[?X1]".format(iclr_encoder_decoder.unary_canonical_to_input_predicate_dict[cd_fact_predicate])
             else:
-                if "X1" in variable_unification:
-                    y1, y2 = variable_unification["X1"]
-                else:
-                    y1 = "Y".format(variable_counter)
-                    y2 = "Z".format(variable_counter)
-                    head = "<{}>[?{},?{}]".format(iclr_encoder_decoder.unary_canonical_to_input_predicate_dict[cd_fact_predicate], y1, y2)
+                head = "<{}>[?X1,?X2]".format(iclr_encoder_decoder.unary_canonical_to_input_predicate_dict[cd_fact_predicate])
         rule = head + " :- " + ", ".join(body_atoms) + " .\n"
 
         if args.output is not None:
