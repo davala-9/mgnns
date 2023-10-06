@@ -1,0 +1,17 @@
+/m/02g5h5	/award/award_nominee/award_nominations./award/award_nomination/award_nominee	/m/05yh_t
+/m/06w58f	/award/award_winner/awards_won./award/award_honor/award_winner	/m/02wk_43
+/m/0154j	/location/location/adjoin_s./location/adjoining_relationship/adjoins	/m/0f8l9c
+/m/0f8l9c	/military/military_combatant/military_conflicts./military/military_combatant_group/combatants	/m/0154j
+/m/01vvydl	/award/award_nominee/award_nominations./award/award_nomination/award_nominee	/m/026yqrr
+/m/08nvyr	/award/award_nominated_work/award_nominations./award/award_nomination/nominated_for	/m/04vr_f
+/m/05yh_t	/award/award_nominee/award_nominations./award/award_nomination/award_nominee	/m/02g5h5
+/m/01v1d8	/music/performance_role/regular_performances./music/group_membership/role	/m/028tv0
+/m/026yqrr	/award/award_nominee/award_nominations./award/award_nomination/award_nominee	/m/01vvydl
+/m/0fpkhkz	/film/film/release_date_s./film/film_regional_release_date/film_release_region	/m/0f8l9c
+/m/0404wqb	/award/award_nominee/award_nominations./award/award_nomination/award_nominee	/m/096lf_
+/m/05p09dd	/award/award_winning_work/awards_won./award/award_honor/award	/m/0274v0r
+/m/0f8l9c	/location/location/adjoin_s./location/adjoining_relationship/adjoins	/m/0154j
+/m/04vr_f	/award/award_nominated_work/award_nominations./award/award_nomination/nominated_for	/m/08nvyr
+/m/028tv0	/music/performance_role/regular_performances./music/group_membership/role	/m/01v1d8
+/m/096lf_	/award/award_winner/awards_won./award/award_honor/award_winner	/m/0404wqb
+/m/0274v0r	/award/award_category/nominees./award/award_nomination/nominated_for	/m/05p09dd
