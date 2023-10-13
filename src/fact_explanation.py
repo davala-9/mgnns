@@ -410,7 +410,6 @@ if __name__ == "__main__":
         # Unfold extracted rules with the encoder's rules
         if args.encoding_scheme == "iclr22":
             rule_body, can_variable_to_data_variable, top_facts = iclr_encoder_decoder.unfold(rule_body, cd_fact_predicate)
-
             # Process top_facts
             for pair in top_facts:
                 [y1, y2] = list(pair)

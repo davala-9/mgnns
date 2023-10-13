@@ -17,7 +17,7 @@ if __name__ == "__main__":
     dataset_names = configuration["dataset_names"]
     train_graph = configuration["train_graph"] 
     test_graph = configuration["test_graph"] 
-    use_dummy_constants = configuration["use_dummy_constants"]==True 
+    use_dummy_constants = configuration["use_dummy_constants"]=="True" 
     train_examples = configuration["train_examples"] 
     test_positive_examples = configuration["test_positive_examples"] 
     test_negative_examples = configuration["test_negative_examples"] 
