@@ -1,9 +1,30 @@
 ('/m/0x67', '/award/award_winner/awards_won./award/award_honor/award_winner', '/m/09f0bj')
-</award/award_winner/awards_won./award/award_honor/award_winner>[?X1,?X2] :- </people/ethnicity/people>[?Y2,?X2], </award/award_winner/awards_won./award/award_honor/award_winner>[?X2,?Y1] .
+</award/award_winner/awards_won./award/award_honor/award_winner>[?X1,?X2] :- </award/award_winner/awards_won./award/award_honor/award_winner>[?X2,?Y2], </people/ethnicity/people>[?Y1,?X2], </people/ethnicity/people>[?X1,?X2] .
 
 ('/m/0k2mxq', '/award/award_winner/awards_won./award/award_honor/award_winner', '/m/09f0bj')
-</award/award_winner/awards_won./award/award_honor/award_winner>[?X1,?X2] :- </award/award_winner/awards_won./award/award_honor/award_winner>[?X2,?Y2], </people/ethnicity/people>[?Y1,?X2] .
+</award/award_winner/awards_won./award/award_honor/award_winner>[?X1,?X2] :- </award/award_winner/awards_won./award/award_honor/award_winner>[?X2,?Y2], </people/ethnicity/people>[?Y1,?X2], </award/award_winner/awards_won./award/award_honor/award_winner>[?X2,?X1] .
 
 ('/m/0js9s', '/award/award_nominee/award_nominations./award/award_nomination/nominated_for', '/m/017gl1')
-</award/award_nominee/award_nominations./award/award_nomination/nominated_for>[?X1,?X2] :- </film/director/film>[?X1,?X2], </film/film/genre>[?X2,?Y3], </award/award_category/nominees./award/award_nomination/nominated_for>[?Y2,?X2], </film/actor/film./film/performance/film>[?Y1,?X2], </award/award_winner/awards_won./award/award_honor/award_winner>[?Y7,?X1], </award/award_nominee/award_nominations./award/award_nomination/award_nominee>[?X1,?Y6], </award/award_winner/awards_won./award/award_honor/award_winner>[?X1,?Y5], </film/director/film>[?X1,?Y4], </award/award_winning_work/awards_won./award/award_honor/award_winner>[?X2,?X1] .
+</award/award_nominee/award_nominations./award/award_nomination/nominated_for>[?X1,?X2] :- </film/actor/film./film/performance/film>[?Y3,?X2], </film/film/genre>[?X2,?Y2], </award/award_category/nominees./award/award_nomination/nominated_for>[?Y1,?X2], </film/director/film>[?X1,?X2], </award/award_winning_work/awards_won./award/award_honor/award_winner>[?X2,?X1], </award/award_winner/awards_won./award/award_honor/award_winner>[?Y7,?X1], </award/award_winner/awards_won./award/award_honor/award_winner>[?X1,?Y6], </film/director/film>[?X1,?Y5], </award/award_nominee/award_nominations./award/award_nomination/award_nominee>[?X1,?Y4] .
+
+('/m/0cqh6z', '/award/award_winner/awards_won./award/award_honor/award_winner', '/m/09f0bj')
+</award/award_winner/awards_won./award/award_honor/award_winner>[?X1,?X2] :- </award/award_winner/awards_won./award/award_honor/award_winner>[?X2,?Y2], </people/ethnicity/people>[?Y1,?X2], </award/award_nominee/award_nominations./award/award_nomination/award>[?X2,?X1] .
+
+('/m/06s6hs', '/award/award_winner/awards_won./award/award_honor/award_winner', '/m/09f0bj')
+</award/award_winner/awards_won./award/award_honor/award_winner>[?X1,?X2] :- </award/award_winner/awards_won./award/award_honor/award_winner>[?X2,?Y2], </people/ethnicity/people>[?Y1,?X2], </base/popstra/celebrity/friendship./base/popstra/friendship/participant>[?X1,?X2] .
+
+('/m/05np4c', '/award/award_winner/awards_won./award/award_honor/award_winner', '/m/09f0bj')
+</award/award_winner/awards_won./award/award_honor/award_winner>[?X1,?X2] :- </award/award_winner/awards_won./award/award_honor/award_winner>[?X2,?Y2], </people/ethnicity/people>[?Y1,?X2], </award/award_nominee/award_nominations./award/award_nomination/award_nominee>[?X1,?X2] .
+
+('/m/02nwxc', '/award/award_nominee/award_nominations./award/award_nomination/nominated_for', '/m/01g03q')
+</award/award_nominee/award_nominations./award/award_nomination/nominated_for>[?X1,?X2] :- </base/popstra/celebrity/dated./base/popstra/dated/participant>[?Y4,?X1], </award/award_nominee/award_nominations./award/award_nomination/nominated_for>[?X1,?Y3], </award/award_winner/awards_won./award/award_honor/award_winner>[?Y2,?X1], </film/actor/film./film/performance/film>[?X1,?Y1], </tv/tv_program/regular_cast./tv/regular_tv_appearance/actor>[?Y8,?X1], </award/award_winner/awards_won./award/award_honor/award_winner>[?Y7,?X1], </award/award_nominee/award_nominations./award/award_nomination/award_nominee>[?X1,?Y6], </award/award_winner/awards_won./award/award_honor/award_winner>[?X1,?Y5], </film/actor/film./film/performance/film>[?X1,?Y9], </tv/tv_program/regular_cast./tv/regular_tv_appearance/actor>[?X2,?X1] .
+
+('/m/02d413', '/award/award_winner/awards_won./award/award_honor/award_winner', '/m/09f0bj')
+</award/award_winner/awards_won./award/award_honor/award_winner>[?X1,?X2] :- </award/award_winner/awards_won./award/award_honor/award_winner>[?X2,?Y2], </people/ethnicity/people>[?Y1,?X2], </film/actor/film./film/performance/film>[?X2,?X1] .
+
+('/m/02cx90', '/award/award_winner/awards_won./award/award_honor/award_winner', '/m/01l4zqz')
+</award/award_winner/awards_won./award/award_honor/award_winner>[?X1,?X2] :- </award/award_winner/awards_won./award/award_honor/award_winner>[?X2,?Y2], </people/ethnicity/people>[?Y1,?X2], </award/award_winner/awards_won./award/award_honor/award_winner>[?X2,?X1] .
+
+('/m/02cx90', '/award/award_nominee/award_nominations./award/award_nomination/award_nominee', '/m/01l4zqz')
+</award/award_nominee/award_nominations./award/award_nomination/award_nominee>[?X1,?X2] :- </award/award_nominee/award_nominations./award/award_nomination/award_nominee>[?X2,?Y1], </award/award_ceremony/awards_presented./award/award_honor/award_winner>[?Y3,?X1], </music/artist/track_contributions./music/track_contribution/role>[?X1,?Y2], </award/award_nominee/award_nominations./award/award_nomination/award_nominee>[?Y4,?X1], </people/ethnicity/people>[?Y5,?X2], </award/award_winner/awards_won./award/award_honor/award_winner>[?Y8,?X2], </award/award_nominee/award_nominations./award/award_nomination/award_nominee>[?Y7,?X2], </people/ethnicity/people>[?Y6,?X2], </award/award_winner/awards_won./award/award_honor/award_winner>[?X2,?X1] .
 

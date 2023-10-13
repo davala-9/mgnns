@@ -84,7 +84,7 @@ if __name__ == "__main__":
 
     for line in lines:
         num_read_lines += 1
-        if num_read_lines > 3:
+        if num_read_lines > 10:
             continue
         if num_read_lines%10 == 0:
             print(num_read_lines)
@@ -114,7 +114,7 @@ if __name__ == "__main__":
         nu_variable_to_node_dict = {"X1": cd_fact_node}
         nu_node_to_variable_dict = {cd_fact_node: "X1"}
 
-        # Optimisation
+        # Optimisation -- IMPORTANT NOTE!! This optimisation only works for max GNNs
         if True and model.num_layers == 2 and model.activation(1) == torch.relu:
 
             # An input unit for a given node, i, and layer is a triple (node',col,j) where
@@ -409,37 +409,33 @@ if __name__ == "__main__":
 
         # Unfold extracted rules with the encoder's rules
         if args.encoding_scheme == "iclr22":
-            rule_body, can_variable_to_data_variable = iclr_encoder_decoder.unfold(rule_body, cd_fact_predicate)
-            # Then, get rid of the \TOP predicates by finding an appropriate predicate
-            data_variable_to_can_variable = {}
-            for s in can_variable_to_data_variable:
-                if len(can_variable_to_data_variable[s]) == 1:
-                    data_variable_to_can_variable[can_variable_to_data_variable[s][0]] = s
-            new_rule_body = rule_body.copy()
-            for (s, p, o) in rule_body:
-                if p == "TOP":
-                    x1 = data_variable_to_can_variable[s]
-                    x2 = data_variable_to_can_variable[o]
-                    can_a = nodes.node_const_dict[nu_variable_to_node_dict[x1]]
-                    can_b = nodes.node_const_dict[nu_variable_to_node_dict[x2]]
-                    a, = iclr_encoder_decoder.term_tuple_dict[can_a]
-                    b, = iclr_encoder_decoder.term_tuple_dict[can_b]
-                    t = iclr_encoder_decoder.tuple_term_dict[(a, b)]
-                    reverse_t = iclr_encoder_decoder.tuple_term_dict[(b, a)]
-                    fact_found = False
-                    for (a1, a2, a3) in cd_dataset:
-                        if not fact_found and a1 == t and a2 == type_pred:
+            rule_body, can_variable_to_data_variable, top_facts = iclr_encoder_decoder.unfold(rule_body, cd_fact_predicate)
+
+            # Process top_facts
+            for pair in top_facts:
+                [y1, y2] = list(pair)
+                cvar_list = iclr_encoder_decoder.find_canonical_variable(can_variable_to_data_variable, y1, y2)
+                if len(cvar_list) == 1:
+                    # y1 and y2 come from a binary canonical variable
+                    ab = nodes.node_const_dict[nu_variable_to_node_dict[cvar_list[0]]]
+                    a, b = iclr_encoder_decoder.term_tuple_dict[ab]
+                    ba = iclr_encoder_decoder.tuple_term_dict[(b, a)]
+                else:
+                    # y1 and y2 come from unary canonical variables
+                    a = nu_variable_to_node_dict[cvar_list[0]]
+                    b = nu_variable_to_node_dict[cvar_list[1]]
+                    ab = iclr_encoder_decoder.tuple_term_dict[(a, b)]
+                    ba = iclr_encoder_decoder.tuple_term_dict[(b, a)]
+                fact_found = False
+                for (a1, a2, a3) in cd_dataset:
+                    if not fact_found and a2 == type_pred:
+                        if a1 == ab:
                             fact_found = True
-                            new_rule_body.remove((s, p, o))
-                            new_rule_body.append(
-                            (s, iclr_encoder_decoder.unary_canonical_to_input_predicate_dict[a3], o))
-                        if not fact_found and a1 == reverse_t and a2 == type_pred:
+                            rule_body.append((y1, iclr_encoder_decoder.unary_canonical_to_input_predicate_dict[a3], y2))
+                        elif a1 == ba:
                             fact_found = True
-                            new_rule_body.remove((s, p, o))
-                            new_rule_body.append(
-                                (o, iclr_encoder_decoder.unary_canonical_to_input_predicate_dict[a3], s))
-                    assert fact_found
-        rule_body = new_rule_body
+                            rule_body.append((y2, iclr_encoder_decoder.unary_canonical_to_input_predicate_dict[a3], y1))
+                assert fact_found
 
         # Write the rule
         body_atoms = []

@@ -288,6 +288,7 @@ class ICLREncoderDecoder:
         # in the data. These are determined by either the rule head, or by the connections of this variable to others in
         # the canonical rule
         can_variables_to_data_variables = {}
+        new_body = []
 
 #       first, figure out the arity of the head variable, and assign corresponding variables in the data rule
         if self.associated_arity(unary_head_predicate) == 1:
@@ -298,10 +299,10 @@ class ICLREncoderDecoder:
         # if we encounter a unary predicate U(y) with y a binary variable, and we don't know which variables it is
         # associated to, we just delay processing it until the next round. This won't delay it indefinitely, since in
         # each round we always get to define one additional variable.
-        this_round = []
         next_round = rule_body
-        new_body = []
         new_variables_counter = 0
+        # Here we store sets of two elements {a,b} such that either R(a,b) or R(b,a) must appear in the body for some R
+        top_facts = set()
 
         while next_round:
             this_round = next_round.copy()
@@ -325,10 +326,12 @@ class ICLREncoderDecoder:
                                     new_variables_counter += 1
                                     y = "Y{}".format(new_variables_counter)
                                     can_variables_to_data_variables[o] = [can_variables_to_data_variables[s][0], y]
+                                    top_facts.add(frozenset((can_variables_to_data_variables[s][0], y)))
                             else:
                                 # Fact of the form Ec1((g(x,y),f(x)) in the canonical rule
                                 if o not in can_variables_to_data_variables:
                                     can_variables_to_data_variables[o] = [can_variables_to_data_variables[s][0]]
+                                top_facts.add(frozenset((can_variables_to_data_variables[s][0], can_variables_to_data_variables[s][1])))
                         elif p == self.binary_canonical[2]:
                             if len(can_variables_to_data_variables[s]) == 1:
                                 # Fact of the form Ec2(f(x),g(y,x)) in the canonical rule
@@ -336,16 +339,19 @@ class ICLREncoderDecoder:
                                     new_variables_counter += 1
                                     y = "Y{}".format(new_variables_counter)
                                     can_variables_to_data_variables[o] = [y, can_variables_to_data_variables[s][0]]
+                                    top_facts.add(frozenset((can_variables_to_data_variables[s][0], y)))
                             else:
                                 # Fact of the form Ec2((g(x,y),f(y)) in the canonical rule
                                 if o not in can_variables_to_data_variables:
                                     can_variables_to_data_variables[o] = [can_variables_to_data_variables[s][1]]
+                                top_facts.add(frozenset((can_variables_to_data_variables[s][0], can_variables_to_data_variables[s][1])))
                         elif p == self.binary_canonical[3]:
                             # Fact of the form Ec3(g(x,y),g(y,x)) in the canonical rule
                             assert len(can_variables_to_data_variables[s]) == 2
                             if o not in can_variables_to_data_variables:
                                 can_variables_to_data_variables[o] = [can_variables_to_data_variables[s][1],
                                                                       can_variables_to_data_variables[s][0]]
+                            top_facts.add(frozenset((can_variables_to_data_variables[s][0], can_variables_to_data_variables[s][1])))
                         elif p == self.binary_canonical[4]:
                             # Fact of the form Ec4(f(x),f(y)) in the canonical rule
                             assert len(can_variables_to_data_variables[s]) == 1
@@ -353,7 +359,7 @@ class ICLREncoderDecoder:
                                 new_variables_counter += 1
                                 y = "Y{}".format(new_variables_counter)
                                 can_variables_to_data_variables[o] = [y]
-                                new_body.append((s, "TOP", o))
+                                top_facts.add(frozenset((can_variables_to_data_variables[s][0],  y)))
                         else:
                             raise Exception("Error: binary predicate not corresponding to one of the four colours")
                 elif o in can_variables_to_data_variables:
@@ -365,10 +371,12 @@ class ICLREncoderDecoder:
                                 new_variables_counter += 1
                                 y = "Y{}".format(new_variables_counter)
                                 can_variables_to_data_variables[s] = [can_variables_to_data_variables[o][0], y]
+                                top_facts.add(frozenset((can_variables_to_data_variables[o][0], y)))
                         else:
                             # Fact of the form Ec1(f(x),g(x,y)) in the canonical rule
                             if s not in can_variables_to_data_variables:
                                 can_variables_to_data_variables[s] = [can_variables_to_data_variables[o][0]]
+                            top_facts.add(frozenset((can_variables_to_data_variables[o][0], can_variables_to_data_variables[o][1])))
                     elif p == self.binary_canonical[2]:
                         if len(can_variables_to_data_variables[o]) == 1:
                             # Fact of the form Ec2((g(x,y),f(y))in the canonical rule
@@ -376,16 +384,19 @@ class ICLREncoderDecoder:
                                 new_variables_counter += 1
                                 y = "Y{}".format(new_variables_counter)
                                 can_variables_to_data_variables[s] = [y, can_variables_to_data_variables[o][0]]
+                                top_facts.add(frozenset((can_variables_to_data_variables[o][0], y)))
                         else:
                             # Fact of the form Ec2(f(x),g(y,x))  in the canonical rule
                             if s not in can_variables_to_data_variables:
                                 can_variables_to_data_variables[s] = [can_variables_to_data_variables[o][1]]
+                            top_facts.add(frozenset((can_variables_to_data_variables[o][0], can_variables_to_data_variables[o][1])))
                     elif p == self.binary_canonical[3]:
                         # Fact of the form Ec3(g(x,y),g(y,x)) in the canonical rule
                         assert len(can_variables_to_data_variables[o]) == 2
                         if s not in can_variables_to_data_variables:
                             can_variables_to_data_variables[s] = [can_variables_to_data_variables[o][1],
                                                                   can_variables_to_data_variables[o][0]]
+                        top_facts.add(frozenset((can_variables_to_data_variables[o][0], can_variables_to_data_variables[o][1])))
                     elif p == self.binary_canonical[4]:
                         # Fact of the form Ec4(f(x),f(y)) in the canonical rule
                         assert len(can_variables_to_data_variables[o]) == 1
@@ -393,10 +404,37 @@ class ICLREncoderDecoder:
                             new_variables_counter += 1
                             y = "Y{}".format(new_variables_counter)
                             can_variables_to_data_variables[s] = [y]
-                            new_body.append((o, "TOP", s))
+                            top_facts.add(frozenset((can_variables_to_data_variables[o][0], y)))
                     else:
                         raise Exception("Error: binary predicate not corresponding to one of the four colours")
                 else:
                     next_round.append((s, p, o))
+        # Little optimisation: remove top facts that are unnecessary because the required variables already apear together
+        for (s, p, o) in new_body:
+            if frozenset((s, o)) in top_facts:
+                top_facts.remove(frozenset((s, o)))
+        return new_body, can_variables_to_data_variables, top_facts
 
-        return new_body, can_variables_to_data_variables
+
+    # This is a rather specific function. Given two data variables y1 and y2, this returns a single variable if y1 y2
+    # correspond to a single canonical variable y, and two variables if they correspond to a canonical variable each.
+    def find_canonical_variable(self, can_variables_to_data_variables, y1, y2):
+        binary = None
+        unary_y1 = None
+        unary_y2 = None
+        for cvar in can_variables_to_data_variables:
+            if len(can_variables_to_data_variables[cvar]) == 2 and (
+                    (can_variables_to_data_variables[cvar][0] == y1 and can_variables_to_data_variables[cvar][1] == y2) or
+                    (can_variables_to_data_variables[cvar][0] == y2 and can_variables_to_data_variables[cvar][1] == y1)):
+                binary = cvar
+            elif len(can_variables_to_data_variables[cvar]) == 1:
+                if can_variables_to_data_variables[cvar][0] == y1:
+                    unary_y1 = cvar
+                elif can_variables_to_data_variables[cvar][0] == y2:
+                    unary_y2 = cvar
+        if binary:
+            return [binary]
+        elif unary_y1 and unary_y2:
+            return [unary_y1, unary_y2]
+        else:
+            raise Exception("Error: data variables {} and {} do not seem to match any canonical variable. Bug.".format(y1,y2))
