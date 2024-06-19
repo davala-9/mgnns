@@ -46,6 +46,9 @@ parser.add_argument('--iclr22-encoder-file',
 parser.add_argument('--print-entailed-facts',
                     default=None,
                     help='Print the facts that have been derived in the provided filename.')
+parser.add_argument('--model-clamping',
+                     default=None,
+                     help='Clamp to zero all weights with absolute value under this number at the end')
 args = parser.parse_args()
 
 
@@ -128,6 +131,31 @@ if __name__ == "__main__":
     print("Evaluating model {} on dataset {} using threshold={}".format(args.load_model_name,
                                                                         args.test_graph, args.threshold))
     model = torch.load(args.load_model_name).to(device)
+
+    def threshold_matrix_values(matrix: torch.tensor, threshold: float, negative_only=False):
+        below_threshold_mask = matrix <= -threshold
+        above_threshold_mask = matrix >= threshold
+        if negative_only:
+            outside_threshold_mask = torch.logical_or(below_threshold_mask, matrix >= 0)
+        else:
+            outside_threshold_mask = torch.logical_or(below_threshold_mask, above_threshold_mask)
+        inside_threshold_mask = torch.logical_not(outside_threshold_mask)
+        matrix[inside_threshold_mask] = 0
+        return torch.sum(outside_threshold_mask == False), torch.numel(outside_threshold_mask)
+
+    if args.model_clamping:
+        n_clamped_weights = 0
+        n_total_weights = 0
+        for layer in range(1, model.num_layers + 1):
+            mat = model.matrix_A(layer)
+            a, b = threshold_matrix_values(model.matrix_A(layer), float(args.model_clamping))
+            n_clamped_weights += a
+            n_total_weights += b
+            for colour in range(model.num_colours):
+                a, b = threshold_matrix_values(model.matrix_B(layer, colour), float(args.model_clamping))
+                n_clamped_weights += a
+                n_total_weights += b
+        print("Percentage of clamped weights: {}".format(n_clamped_weights/n_total_weights))
     model.eval()
 
     # gnn_output : torch.FloatTensor of size i x j, with i = num graph nodes, j = length of feature vectors
@@ -233,25 +261,25 @@ if __name__ == "__main__":
     print("Total examples: {}".format(counter_all))
     print("Scored examples: {}".format(counter_scored))
 
-    with open(args.output, 'w') as f:
-        f.write("Threshold" + '\t' + "Precision" + '\t' + "Recall" + '\t' + "Accuracy" + '\t' + "F1 Score" + '\n')
-        for threshold in threshold_to_counter:
-            tp, fp, tn, fn = threshold_to_counter[threshold]
-            f.write("{}\t{}\t{}\t{}\t{}\n".format(threshold, precision(tp, fp, tn, fn),
-                                                  recall(tp, fp, tn, fn), accuracy(tp, fp, tn, fn),
-                                                  f1score(tp, fp, tn, fn)))
-            recall_vector.append(recall(tp, fp, tn, fn))
-            precision_vector.append(precision(tp, fp, tn, fn))
-        # Add extremal points for AUC. This ensures a perfect classifier has AUC 1, a random classifier has AUC 0.5,
-        # and an `always wrong' classifier has an AUC 0.
-        # Without this, a perfect classifier would have a score of 0!!
-        precision_vector.insert(0, 0)
-        precision_vector.append(1)
-        recall_vector.insert(0, 1)
-        recall_vector.append(0)
-        # Get rid of NaNs
-        recall_vector = nan_to_num(recall_vector)
-        precision_vector = nan_to_num(precision_vector)
-        f.write("Area under precision recall curve: {}\n".format(auprc(precision_vector, recall_vector)))
-
-    f.close()
+    if args.output:
+        with open(args.output, 'w') as f:
+            f.write("Threshold" + '\t' + "Precision" + '\t' + "Recall" + '\t' + "Accuracy" + '\t' + "F1 Score" + '\n')
+            for threshold in threshold_to_counter:
+                tp, fp, tn, fn = threshold_to_counter[threshold]
+                f.write("{}\t{}\t{}\t{}\t{}\n".format(threshold, precision(tp, fp, tn, fn),
+                                                      recall(tp, fp, tn, fn), accuracy(tp, fp, tn, fn),
+                                                      f1score(tp, fp, tn, fn)))
+                recall_vector.append(recall(tp, fp, tn, fn))
+                precision_vector.append(precision(tp, fp, tn, fn))
+            # Add extremal points for AUC. This ensures a perfect classifier has AUC 1, a random classifier has AUC 0.5,
+            # and an `always wrong' classifier has an AUC 0.
+            # Without this, a perfect classifier would have a score of 0!!
+            precision_vector.insert(0, 0)
+            precision_vector.append(1)
+            recall_vector.insert(0, 1)
+            recall_vector.append(0)
+            # Get rid of NaNs
+            recall_vector = nan_to_num(recall_vector)
+            precision_vector = nan_to_num(precision_vector)
+            f.write("Area under precision recall curve: {}\n".format(auprc(precision_vector, recall_vector)))
+        f.close()

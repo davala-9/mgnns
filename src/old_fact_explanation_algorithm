@@ -1,0 +1,68 @@
+        else:
+            # Algorithm MAX-2-TARGET
+            # This version lists contributions and then keeps adding contributions to the rule until ``target'' is met.
+            # This is good in layer 2 because the target is the threshold and we don't overshoot, but it is bad in
+            # layer 1 because the target is the EXACT value that was selected as a contribution in layer 2.
+            # I wrote another algorithm above to address this problem.
+            feature_x1 = torch.zeros(model.layer_dimension(L))
+            feature_x1[cd_fact_pred_pos] = args.threshold
+            current_variables_to_process = [("X1", feature_x1)]
+            for current_layer in range(L, 0, -1):
+                next_round_variables_to_process = []
+                for (y, feature_y) in current_variables_to_process:
+                    feature_y_previous = torch.zeros(model.layer_dimension(current_layer - 1))
+                    for cd_fact_gd_row in range(model.layer_dimension(current_layer)):
+                        if feature_y[cd_fact_gd_row] > 0:
+                            target = feature_y[cd_fact_gd_row].item()
+                            contributions = []
+                            for cd_fact_pred_pos in range(model.layer_dimension(current_layer - 1)):
+                                contrib = model.matrix_A(current_layer)[cd_fact_gd_row][cd_fact_pred_pos].item() * \
+                                          gnn_output_gd[current_layer - 1][node_to_gd_row_dict[nu_variable_to_node_dict[y]]][cd_fact_pred_pos].item()
+                                if contrib > 0:
+                                    # We use 'colour' -1 to represent a contribution by matrix A
+                                    # Adding the row for y to contributions is unnecessary here, since we know it's
+                                    # the contribution to this node by itself, but we do it for homogeneity.
+                                    contributions.append((contrib, node_to_gd_row_dict[nu_variable_to_node_dict[y]], (-1, cd_fact_pred_pos)))
+                            for colour in can_encoder_decoder.colours:
+                                edge_mask = gd_edge_colour_list == colour
+                                colour_edges = gd_edge_list[:, edge_mask]
+                                neighbours = colour_edges[:, colour_edges[1] == node_to_gd_row_dict[nu_variable_to_node_dict[y]]][0].tolist()
+                                for cd_fact_pred_pos in range(model.layer_dimension(current_layer - 1)):
+                                    max_neighbour = None
+                                    max_value = 0
+                                    for neighbour in neighbours:
+                                        contrib = model.matrix_B(current_layer, colour)[cd_fact_gd_row][cd_fact_pred_pos].item() * \
+                                                  gnn_output_gd[current_layer - 1][neighbour][cd_fact_pred_pos].item()
+                                        if contrib > max_value:
+                                            max_neighbour = neighbour
+                                            max_value = contrib
+                                    if max_neighbour is not None:
+                                        contributions.append((max_value, max_neighbour, (colour, cd_fact_pred_pos)))
+
+                            current_sum = model.bias(current_layer)[cd_fact_gd_row].item()
+                            contributions = sorted(contributions, reverse=True)
+                            sigma = model.activation(current_layer)
+                            while target > sigma(torch.tensor(current_sum, dtype=float)).item() and contributions:
+                                (contrib, node_row, (col, cd_fact_pred_pos)) = contributions.pop(0)
+                                if col == -1:
+                                    feature_y_previous[cd_fact_pred_pos] = gnn_output_gd[current_layer - 1][node_to_gd_row_dict[nu_variable_to_node_dict[y]]][cd_fact_pred_pos]
+                                    current_sum += contrib
+                                else:
+                                    variable_counter += 1
+                                    z = "X" + str(variable_counter)
+                                    nu_variable_to_node_dict[z] = gd_row_to_node_dict[node_row]
+                                    nu_node_to_variable_dict[gd_row_to_node_dict[node_row]] = z
+                                    feature_z = torch.zeros(model.layer_dimension(current_layer - 1))
+                                    feature_z[cd_fact_pred_pos] = gnn_output_gd[current_layer - 1][node_row][cd_fact_pred_pos]
+                                    rule_body.append((z, can_encoder_decoder.colour_binary_pred_dict[col], y))
+                                    next_round_variables_to_process.append((z, feature_z))
+                                    current_sum += contrib
+                    next_round_variables_to_process.append((y, feature_y_previous))
+                current_variables_to_process = next_round_variables_to_process.copy()
+
+            current_layer = 0
+            for (y, feature_y) in current_variables_to_process:
+                for cd_fact_gd_row in range(model.layer_dimension(current_layer)):
+                    if feature_y[cd_fact_gd_row] > 0:
+                        assert feature_y[cd_fact_gd_row].item() == 1
+                        rule_body.append((y, type_pred, can_encoder_decoder.position_unary_pred_dict[cd_fact_gd_row]))

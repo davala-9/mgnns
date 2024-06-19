@@ -7,6 +7,7 @@ import argparse
 from encoding_schemes import CanonicalEncoderDecoder, ICLREncoderDecoder
 import numpy as np
 import nodes
+import datetime
 import random
 from random import sample
 from utils import load_predicates
@@ -53,8 +54,7 @@ def relevant(input_positions, mat):
 
 if __name__ == "__main__":
 
-    # Optimisation for link prediction (over 2 layers) (over binary datasets only) (using ICLR22 encoding)
-    optimisation = True
+    print(datetime.datetime.now())
 
     if args.encoding_scheme == 'iclr22':
         iclr_encoder_decoder = ICLREncoderDecoder(load_from_document=args.iclr22_encoder_file)
@@ -76,119 +76,70 @@ if __name__ == "__main__":
 
     for i in range(model.dimensions[-1]):
         print("Constructing Gamma^i_all for position {}".format(i))
-        # Construct \Gamma_i^all and the mask \mu
-        # For convenience during lattice exploration, \Gamma^i_all and mu are represented via three structures:
-        # --mask: a representation of mu as a nested dictionary: layer -> variable -> relevant positions
-        # --path_to_root: a dictionary that maps a variable to the list of atoms connecting it to the root.
-        # --successor_variables: a dictionary mapping each variable to a list of its successors in the tree.
-        if optimisation:
-            c1 = can_encoder_decoder.binary_pred_colour_dict[iclr_encoder_decoder.binary_canonical[1]]
-            c2 = can_encoder_decoder.binary_pred_colour_dict[iclr_encoder_decoder.binary_canonical[2]]
-            c3 = can_encoder_decoder.binary_pred_colour_dict[iclr_encoder_decoder.binary_canonical[3]]
-            variables = ["X1", "X2", "X3", "X4", "X5", "X6", "X7", "X8"]
-            variable_to_index = {vari: indi for indi, vari in enumerate(variables)}
-            path_to_root = {"X1": [],
-                            "X2": [("X1", iclr_encoder_decoder.binary_canonical[1], "X2")],
-                            "X3": [("X1", iclr_encoder_decoder.binary_canonical[2], "X3")],
-                            "X4": [("X1", iclr_encoder_decoder.binary_canonical[3], "X4")],
-                            "X5": [("X1", iclr_encoder_decoder.binary_canonical[1], "X2"),
-                                   ("X2", iclr_encoder_decoder.binary_canonical[1], "X5")],
-                            "X6": [("X1", iclr_encoder_decoder.binary_canonical[1], "X2"),
-                                   ("X2", iclr_encoder_decoder.binary_canonical[2], "X6")],
-                            "X7": [("X1", iclr_encoder_decoder.binary_canonical[2], "X3"),
-                                   ("X3", iclr_encoder_decoder.binary_canonical[1], "X7")],
-                            "X8": [("X1", iclr_encoder_decoder.binary_canonical[2], "X3"),
-                                   ("X3", iclr_encoder_decoder.binary_canonical[2], "X8")]}
-            successor_variables = {"X1": ["X4"], "X4": []}
-            relevant_positions = {2: {"X1": [i]},
-                                  1: {"X1": [], "X2": [], "X3": [], "X4": []},
-                                  0: {"X1": [], "X2": [], "X3": [], "X4": [], "X5": [], "X6": [], "X7": [], "X8": []}}
-            #  LAYER 1
-            relevant_positions[1]["X1"] = relevant(relevant_positions[2]["X1"], model.matrix_A(2))
-            relevant_1 = relevant(relevant_positions[2]["X1"], model.matrix_B(2, c1))
-            relevant_2 = relevant(relevant_positions[2]["X1"], model.matrix_B(2, c2))
-            relevant_3 = relevant(relevant_positions[2]["X1"], model.matrix_B(2, c3))
-            if relevant_1:
-                successor_variables["X2"] = []
-                successor_variables["X1"].append("X2")
-                relevant_positions[1]["X2"] = relevant_1
-            if relevant_2:
-                successor_variables["X3"] = []
-                successor_variables["X1"].append("X3")
-                relevant_positions[1]["X3"] = relevant_2
-            if relevant_3:
-                relevant_positions[1]["X4"] = relevant_3
-            #  LAYER 0
-            # X1
-            relevant_positions[0]["X1"] = relevant(relevant_positions[1]["X1"], model.matrix_A(1))
-            # ignore colours c1 and c2 because there are no unary facts
-            relevant_3 = relevant(relevant_positions[1]["X1"], model.matrix_B(1, c3))
-            if relevant_3:
-                relevant_positions[0]["X4"] = relevant_3
-            # X2
-            # no relevant positions, since there are no unaries
-            relevant_1 = relevant(relevant_positions[1]["X2"], model.matrix_B(1, c1))
-            relevant_2 = relevant(relevant_positions[1]["X2"], model.matrix_B(1, c2))
-            if relevant_1:
-                successor_variables["X5"] = []
-                successor_variables["X2"].append("X5")
-                relevant_positions[0]["X5"] = relevant_1
-            if relevant_2:
-                successor_variables["X6"] = []
-                successor_variables["X2"].append("X6")
-                relevant_positions[0]["X6"] = relevant_2
-            # X3
-            # no relevant positions, since there are no unaries
-            relevant_1 = relevant(relevant_positions[1]["X3"], model.matrix_B(1, c1))
-            relevant_2 = relevant(relevant_positions[1]["X3"], model.matrix_B(1, c2))
-            if relevant_1:
-                successor_variables["X7"] = []
-                successor_variables["X3"].append("X7")
-                relevant_positions[0]["X7"] = relevant_1
-            if relevant_2:
-                successor_variables["X8"] = []
-                successor_variables["X3"].append("X8")
-                relevant_positions[0]["X8"] = relevant_2
-            # X4
-            relevant_positions[0]["X4"] = merge_sort(relevant_positions[0]["X4"],
-                                                     relevant(relevant_positions[1]["X4"], model.matrix_A(1)))
-            # ignore colours c1 and c2 because there are no unary facts
-            relevant_3 = relevant(relevant_positions[1]["X4"], model.matrix_B(1, c3))
-            if relevant_3:
-                relevant_positions[0]["X1"] = merge_sort(relevant_positions[0]["X1"], relevant_3)
-        else:
-            variables = ["X1"]
-            path_to_root = {"X1": []}
-            successor_variables = {"X1": []}
-            relevant_positions = {model.num_layers: {"X1": [i]}}
-            for layer in range(model.num_layers - 1, -1, -1):  # iterate over layer L-1 to 0, both inclusive
-                relevant_positions[layer] = {}
-                new_variables = []
-                for y in variables:
-                    relevant_positions[layer][y] = relevant(relevant_positions[layer+1][y], model.matrix_A(layer+1))
-                    for c in can_encoder_decoder.colours:
-                        new_relevant_positions = relevant(relevant_positions[layer+1][y], model.matrix_B(layer+1,c))
-                        for j in new_relevant_positions:
-                            variable_counter += 1
-                            z = "X{}".format(variable_counter)
-                            new_variables.append(z)
-                            relevant_positions[layer][z] = [j]
-                            path_to_root[z] = path_to_root[y] + [(y, can_encoder_decoder.colour_binary_pred_dict[c], z)]
-                            successor_variables[z] = []
-                            successor_variables[y].append(z)
-                variables = variables + new_variables
-            variable_to_index = {vari: indi for indi, vari in enumerate(variables)}
+        # Construct \Gamma_i^all and the function \mu mapping stuff to masks
+        # mask: a representation of mu as a nested dictionary: layer -> variable -> relevant positions
+        c1 = can_encoder_decoder.binary_pred_colour_dict[iclr_encoder_decoder.binary_canonical[1]]
+        c2 = can_encoder_decoder.binary_pred_colour_dict[iclr_encoder_decoder.binary_canonical[2]]
+        c3 = can_encoder_decoder.binary_pred_colour_dict[iclr_encoder_decoder.binary_canonical[3]]
+        # x is the head variable, y1, y2, y3 are the unique variables connected to it by colours c1, c2, c3, resp.
+        # z11, z12, z21, z22 represent the results of aggregating for variables y1 and y2 in layer 1
+        x, y1, y2, y3, z11, z12, z21, z22 = "X1", "Y1", "Y2", "Y3", "Z11", "Z12", "Z21", "Z22"
+        variables = [x, y1, y2, y3, z11, z12, z21, z22]
+        variable_to_index = {vari: indi for indi, vari in enumerate(variables)}
+        # This graph is always present whenever we deduce a fact of the form R(x,y) in the ICLR encoding.
+        base_graph = [(x, iclr_encoder_decoder.binary_canonical[1], y1),
+                      (y1, iclr_encoder_decoder.binary_canonical[1], x),
+                      (x, iclr_encoder_decoder.binary_canonical[2], y2),
+                      (y2, iclr_encoder_decoder.binary_canonical[2], x),
+                      (x, iclr_encoder_decoder.binary_canonical[3], y3),
+                      (y3, iclr_encoder_decoder.binary_canonical[3], x),
+                      (y1, iclr_encoder_decoder.binary_canonical[2], y3),
+                      (y3, iclr_encoder_decoder.binary_canonical[2], y1),
+                      (y2, iclr_encoder_decoder.binary_canonical[1], y3),
+                      (y3, iclr_encoder_decoder.binary_canonical[1], y2),
+                      (y1, iclr_encoder_decoder.binary_canonical[4], y2),
+                      (y2, iclr_encoder_decoder.binary_canonical[4], y1),
+                      # Second level
+                      (y1, iclr_encoder_decoder.binary_canonical[1], z11),
+                      (z11, iclr_encoder_decoder.binary_canonical[1], y1),
+                      (y1, iclr_encoder_decoder.binary_canonical[2], z12),
+                      (z12, iclr_encoder_decoder.binary_canonical[2], y1),
+                      (y2, iclr_encoder_decoder.binary_canonical[1], z21),
+                      (z21, iclr_encoder_decoder.binary_canonical[1], y2),
+                      (y2, iclr_encoder_decoder.binary_canonical[2], z22),
+                      (z22, iclr_encoder_decoder.binary_canonical[2], y2)]
+        relevant_positions = {2: {x: [i]},
+                              1: {x: [], y1: [], y2: [], y3: []},
+                              0: {x: [], y1: [], y2: [], y3: [], z11: [], z12: [], z21: [], z22: []}}
+        #  LAYER 1
+        relevant_positions[1][x] = relevant(relevant_positions[2][x], model.matrix_A(2))
+        relevant_positions[1][y1] = relevant(relevant_positions[2][x], model.matrix_B(2, c1))
+        relevant_positions[1][y2] = relevant(relevant_positions[2][x], model.matrix_B(2, c2))
+        relevant_positions[1][y3] = relevant(relevant_positions[2][x], model.matrix_B(2, c3))
+        #  LAYER 0
+        # x
+        relevant_positions[0][x] = relevant(relevant_positions[1][x], model.matrix_A(1))
+        # ignore colours c1 and c2 because there are no unary facts
+        relevant_positions[0][y3] = relevant(relevant_positions[1][x], model.matrix_B(1, c3))
+        # y1 has no relevant positions, since there are no unaries
+        # y2 has no relevant positions, since there are no unaries
+        relevant_positions[0][z11] = relevant(relevant_positions[1][y1], model.matrix_B(1, c1))
+        relevant_positions[0][z12] = relevant(relevant_positions[1][y1], model.matrix_B(1, c2))
+        relevant_positions[0][z21] = relevant(relevant_positions[1][y2], model.matrix_B(1, c1))
+        relevant_positions[0][z22] = relevant(relevant_positions[1][y2], model.matrix_B(1, c2))
+        # y3
+        relevant_positions[0][y3] = merge_sort(relevant_positions[0][y3], relevant(relevant_positions[1][y3], model.matrix_A(1)))
+        # ignore colours c1 and c2 because there are no unary facts
+        relevant_positions[0][x] = merge_sort(relevant_positions[0][x], relevant(relevant_positions[1][y3], model.matrix_B(1, c3)))
 
-        # In the lattice exploration, bodies of candidate rules are represented as a pair. The first element of the
-        # pair is a number encoding (in binary) which variables are present, as a Boolean mask on the 'variables' list.
-        # The second element of the pair is a tuple of numbers of length equal to the number of '1' in the first element
-        # of the pair. The i-th number in this tuple corresponds to the variable y associated to the i-th '1' in the
-        # first element of the pair. This number can be translated to a mask on relevant[0][y] that represents the
-        # unary predicates for y in the body of the rule.
+        relevant_variables = [variab for variab in variables if len(relevant_positions[0][variab]) > 0]
+        N = len(relevant_variables)
+        # In the lattice exploration, bodies of candidate rules are represented as an N-tuple of numbers.
+        # Each element in the tuple is a number corresponding to a variable var.
+        # The binary translation of the number (read right-to-left) is a mask for the predicates in the positions of
+        # relevant_positions[0][var]
         # For example, if relevant[0][y] = (1,3,6), conjunction U1(y) ^ U6(y) is 5 (101).
-        # Binary atoms are not represented since they can be computed from the list of variables and path_to_root
-        # A unary mask number of -1 represents that there are no relevant unaries (distinct from 0, meaning at least
-        # one relevant unary that is not present).
+        # Binary atoms are not represented since they are always present
 
         def number_to_mask(num, pad_to=0):
             if num == -1:
@@ -202,167 +153,126 @@ if __name__ == "__main__":
 
         def evaluate_rule(head_predicate_position, candidate_body):
             # Given a rule, evaluate whether it is captured by the model.
-            rule_dataset = set()
-            index_into_unaries_tuple_of_last_seen_variable = -1
-            for index_in_var_mask, var_mask_value in enumerate(number_to_mask(candidate_body[0])):
-                y_var = variables[index_in_var_mask]
-                if var_mask_value == '1':
-                    index_into_unaries_tuple_of_last_seen_variable += 1
-                    rule_dataset = rule_dataset.union(set(path_to_root[y_var]))  # Add all binary facts
-                    # print("candidate_body")
-                    # print(number_to_mask(candidate_body[0]))
-                    # print(candidate_body[1])
-                    unary_mask = number_to_mask(candidate_body[1][index_into_unaries_tuple_of_last_seen_variable])
-                    # print("unary mask {}".format(unary_mask))
-                    for index_in_unary_mask, unary_mask_value in enumerate(unary_mask):
-                        if unary_mask_value == '1':
-                            # print(relevant_positions[0][y_var])
-                            # print(index_in_unary_mask)
-                            rule_dataset.add(
-                                (y_var, type_pred, can_encoder_decoder.position_unary_pred_dict[
-                                    relevant_positions[0][y_var][index_in_unary_mask]]))
-            if rule_dataset:
-                (features, node_to_row, edge_list, edge_colour_list) = can_encoder_decoder.encode_dataset(rule_dataset)
-                rule_data = Data(x=features, edge_index=edge_list, edge_type=edge_colour_list).to(device)
-                gnn_output_rule = model(rule_data)
-                output_node = nodes.const_node_dict["X1"]  # This variable always appears in non-empty candidates.
-                return gnn_output_rule[node_to_row[output_node]][head_predicate_position] >= args.threshold
-            else:
-                x = torch.FloatTensor(np.zeros((1, model.dimensions[0])))
-                rule_data = Data(x=x, edge_index=torch.full((2, 0), 0, dtype=torch.long),
-                                 edge_type=torch.LongTensor([])).to(device)
-                gnn_output_rule = model(rule_data)
-                return gnn_output_rule[0][head_predicate_position] >= args.threshold
+            # Optimised model application where we only apply all relevant operations.
+            # This should contain the vectors for all the variables
+            vectors_layer_0 = {}
+            for var_index in range(8):
+                vectors_layer_0[var_index] = torch.zeros(model.dimensions[0])
+            for var_index in range(N):
+                y_var = relevant_variables[var_index]
+                if candidate_body[var_index] > 0:
+                    mask = number_to_mask(candidate_body[var_index], pad_to=len(relevant_positions[0][y_var]))
+                    for ii, jj in enumerate(relevant_positions[0][y_var]):
+                        if mask[ii] == '1':
+                            vectors_layer_0[variable_to_index[y_var]][jj] = 1
+            vectors_layer_1 = {}
+            vectors_layer_1[0] = torch.relu(torch.add(
+                torch.add(torch.matmul(model.matrix_A(1),vectors_layer_0[0]),torch.matmul(model.matrix_B(1,c3),vectors_layer_0[3])),
+                model.bias(1)))
+            vectors_layer_1[1] = torch.relu(torch.add(
+                torch.add(torch.matmul(model.matrix_B(1,c1), vectors_layer_0[4]), torch.matmul(model.matrix_B(1, c2), vectors_layer_0[5])),
+                model.bias(1)))
+            vectors_layer_1[2] = torch.relu(torch.add(
+                torch.add(torch.matmul(model.matrix_B(1, c1), vectors_layer_0[6]), torch.matmul(model.matrix_B(1, c2), vectors_layer_0[7])),
+                model.bias(1)))
+            vectors_layer_1[3] = torch.relu(torch.add(
+                torch.add(torch.matmul(model.matrix_A(1), vectors_layer_0[3]), torch.matmul(model.matrix_B(1, c3),vectors_layer_0[0])),
+                model.bias(1)))
+            return torch.nn.Sigmoid()(torch.add(torch.add(torch.add(torch.add(
+                torch.matmul(model.matrix_A(2)[head_predicate_position],vectors_layer_1[0]), torch.matmul(model.matrix_B(2,c1)[head_predicate_position],vectors_layer_1[1])),
+                torch.matmul(model.matrix_B(2,c2)[head_predicate_position],vectors_layer_1[2])), torch.matmul(model.matrix_B(2,c3)[head_predicate_position], vectors_layer_1[3])),
+                model.bias(2)[head_predicate_position]).subtract(10)).detach() >= args.threshold
 
 
         def get_successors(candidate_body):
-            # Optimisation: TO AVOID REPETITION, we only look for FORWARD successors, essentially meaning that we
-            # always go to the last variable, and work from there. We don't lose completeness since any successor
-            # ignored in this way contains at least one other successor in the frontier.
-            # This means that each node can only be added to the frontier ONCE.
-            # verify(candidate_body)
-            successors = set()  # Output
-            indices_successors_to_introduce = []  # Indices of succs that we might need to add (may contain duplicates!)
-            index_in_unaries_tuple_of_last_seen_variable = -1
-            variables_mask = number_to_mask(candidate_body[0])
-            last_variable_mask_index = variables_mask.rindex('1')  # This always exists since X1 is always there.
-            for index_in_var_mask, var_mask_value in enumerate(variables_mask):
-                y_var = variables[index_in_var_mask]
-                if var_mask_value == '1':
-                    index_in_unaries_tuple_of_last_seen_variable += 1
-                    while indices_successors_to_introduce and index_in_var_mask == indices_successors_to_introduce[0]:  # successor was already present
-                        indices_successors_to_introduce.pop(0)  # Use a while loop because of potential duplicates
-                    # Create successors obtained by adding a unary fact for an existing variable
-                    # Optimisation: But only if this is the last variable in the candidate!
-                    if index_in_var_mask == last_variable_mask_index:
-                        unary_mask = number_to_mask(candidate_body[1][index_in_unaries_tuple_of_last_seen_variable], pad_to=len(relevant_positions[0][y_var]))  # Pad because we need to see all possible zeroes.
-                        last_position_mask_index = -1
-                        if '1' in unary_mask:
-                            last_position_mask_index = unary_mask.rindex('1')
-                        for index_in_unary_mask, unary_mask_value in enumerate(unary_mask):
-                            # Optimisation: Only add '1's after the last current '1'
-                            if unary_mask_value == '0' and index_in_var_mask > last_position_mask_index:
-                                new_unary_mask = unary_mask[:index_in_unary_mask] + '1' + unary_mask[index_in_unary_mask + 1:]
-                                new_successor = (candidate_body[0], candidate_body[1][:index_in_unaries_tuple_of_last_seen_variable] + (mask_to_number(new_unary_mask),) + candidate_body[1][index_in_unaries_tuple_of_last_seen_variable+1:]) # Substitution
-                                # verify(new_successor)
-                                successors.add(new_successor)
-                    # Create successors by adding new variables: schedule successors for addition
-                    new_successors = []
-                    for vari in successor_variables[y_var]:
-                        if variable_to_index[vari] > last_variable_mask_index:
-                            new_successors.append(variable_to_index[vari])
-                    indices_successors_to_introduce.extend(new_successors)
-                    indices_successors_to_introduce = sorted(indices_successors_to_introduce)
-                else:
-                    assert var_mask_value == '0'
-                    # If scheduled, create successors by adding new variables:
-                    if indices_successors_to_introduce and index_in_var_mask == indices_successors_to_introduce[0]:
-                        # add a successor here
-                        while indices_successors_to_introduce and index_in_var_mask == indices_successors_to_introduce[0]:
-                            indices_successors_to_introduce.pop(0)  # To remove duplicates.
-                        new_variables_mask = variables_mask[:index_in_var_mask] + '1' + variables_mask[index_in_var_mask+1:] # Substitution
-                        if relevant_positions[0][y_var]:
-                            new_unaries_mask_tuple = candidate_body[1][:index_in_unaries_tuple_of_last_seen_variable+1] + (0,) + candidate_body[1][index_in_unaries_tuple_of_last_seen_variable+1:] # Insertion
-                        else:
-                            new_unaries_mask_tuple = candidate_body[1][ :index_in_unaries_tuple_of_last_seen_variable + 1] + (-1,) + candidate_body[1][ index_in_unaries_tuple_of_last_seen_variable + 1:]  # Insertion
-                        new_successor = (mask_to_number(new_variables_mask), new_unaries_mask_tuple)
-                        # verify(new_successor)
-                        successors.add(new_successor)
-            # Finally, take care of successors going beyond those in candidate_bod[0]
-            current_index = len(variables_mask) - 1
-            while indices_successors_to_introduce:
-                current_index += 1
-                if indices_successors_to_introduce and current_index == indices_successors_to_introduce[0]:
-                    while indices_successors_to_introduce and current_index == indices_successors_to_introduce[0]:
-                        indices_successors_to_introduce.pop(0)
-                    new_variables_mask = variables_mask + '1'
-                    y_var = variables[current_index]
-                    if relevant_positions[0][y_var]:
-                        new_unaries_mask_tuple = candidate_body[1] + (0,)
+            successors = []
+            # To avoid repetition, we change zeros to ones only from the first zero after the last 1 in (the binary
+            # representation of) the node.
+            var_index = N-1
+            var_with_one_found = False
+            while (not var_with_one_found) and var_index >= 0:
+                y_var = relevant_variables[var_index]
+                mask = number_to_mask(candidate_body[var_index], pad_to=len(relevant_positions[0][y_var]))
+                mask_index = len(mask) - 1
+                one_found = False
+                while (not one_found) and mask_index >= 0:
+                    if mask[mask_index] == '0':
+                        new_mask = mask[:mask_index] + '1' + mask[mask_index+1:]
+                        new_body = candidate_body[:var_index] + (mask_to_number(new_mask),) + candidate_body[var_index+1:]
+                        successors.append(new_body)
                     else:
-                        new_unaries_mask_tuple = candidate_body[1] + (-1,)
-                    new_successor = (mask_to_number(new_variables_mask), new_unaries_mask_tuple)
-                    # verify(new_successor)
-                    successors.add(new_successor)
-                variables_mask = variables_mask + '0'
-            return list(successors)
+                        one_found = True
+                        var_with_one_found = True
+                    mask_index = mask_index - 1
+                var_index = var_index - 1
+            return successors
 
-        def verify(candidate):
-            var_num = candidate[0]
-            unaries_tup = candidate[1]
-            var_mask = number_to_mask(var_num)
-            index_last_seen_variable = -1
-            for var_mask_index, var_mask_value in enumerate(var_mask):
-                if var_mask_value == '1':
-                    index_last_seen_variable += 1
-                    var_y = variables[var_mask_index]
-                    unaries_mask = number_to_mask(unaries_tup[index_last_seen_variable], pad_to=len(relevant_positions[0][var_y]))
-                    #print("test")
-                    #print(unaries_mask)
-                    #print(relevant_positions[0][var_y])
-                    assert len(unaries_mask) == len(relevant_positions[0][var_y])
 
+        def get_predeccessors(candidate_body):
+            predecessors = []
+            # To avoid repetition, we change ones to zeros only from the first one after the last zero in (the binary
+            # representation of) the node.
+            var_index = N - 1
+            var_with_zero_found = False
+            while (not var_with_zero_found) and var_index >= 0:
+                y_var = relevant_variables[var_index]
+                mask = number_to_mask(candidate_body[var_index], pad_to=len(relevant_positions[0][y_var]))
+                mask_index = len(mask) - 1
+                zero_found = False
+                while (not zero_found) and mask_index >= 0:
+                    if mask[mask_index] == '1':
+                        new_mask = mask[:mask_index] + '0' + mask[mask_index + 1:]
+                        new_body = candidate_body[:var_index] + (mask_to_number(new_mask),) + candidate_body[var_index + 1:]
+                        predecessors.append(new_body)
+                    else:
+                        zero_found = True
+                        var_with_zero_found = True
+                    mask_index = mask_index - 1
+                var_index = var_index - 1
+            return predecessors
 
         def is_smaller_or_equal(candidate_1, candidate_2):
-            # First, check if the first candidate has a variable not in the second
-            if (candidate_1[0] | candidate_2[0]) != candidate_2[0]:
-                return False
-            # Then, compare the unary predicates for the variables, one by one.
-            mask_1 = number_to_mask(candidate_1[0])
-            mask_2 = number_to_mask(candidate_2[0])
-            index_in_unaries_tuple_of_last_seen_variable_1 = -1
-            index_in_unaries_tuple_of_last_seen_variable_2 = -1
-            for var_mask_value_1, var_mask_value_2 in zip(mask_1, mask_2):
-                if var_mask_value_1 == '1':
-                    index_in_unaries_tuple_of_last_seen_variable_1 += 1
-                    assert var_mask_value_2 == '1'
-                    index_in_unaries_tuple_of_last_seen_variable_2 += 1
-                    unary_mask_number_1 = candidate_1[1][index_in_unaries_tuple_of_last_seen_variable_1]
-                    unary_mask_number_2 = candidate_2[1][index_in_unaries_tuple_of_last_seen_variable_2]
-                    if (unary_mask_number_1 | unary_mask_number_2) != unary_mask_number_2:
+            for val1, val2 in zip(candidate_1, candidate_2):
+                if val1 >= 0:
+                    if val2 < 0:
                         return False
-                elif var_mask_value_2 == '1':
-                    index_in_unaries_tuple_of_last_seen_variable_2 += 1
+                    else:
+                        if (val1 | val2) != val2:
+                            return False
             return True
-
 
         print("Exploring lattice for {}".format(i))
         # Explore the lattice
         total_levels = 0
         for var in relevant_positions[0]:
-            total_levels += 1
             for pos in relevant_positions[0][var]:
                 total_levels += 1
+
+        # Start with a top-down short exploration, to optimise
+
         min_pos = []
         next_frontier = []  # pair: first element is number 1 (variable X1) and second is a tuple that just contains 0
-        if evaluate_rule(i, (1, (0,))):
-            min_pos = [(1, (0,))]
+        empty_body = []
+        full_body = []
+        for v_index in range(N):
+            empty_body.append(0)
+            full_body.append(mask_to_number('1' * len(relevant_positions[0][relevant_variables[v_index]])))
+        full_body = tuple(full_body)
+        empty_body = tuple(empty_body)
+        if evaluate_rule(i, full_body):
+            if evaluate_rule(i, empty_body):
+                min_pos = [empty_body]
+            else:
+                next_frontier = [empty_body]
         else:
-            next_frontier = [(1, (0,))]
+            print("No rule captured for head predicate position {}".format(i))
+            min_pos = []
         counter = 0
         while next_frontier:
             counter += 1
             print("Frontier iterations: {}/{}".format(counter, total_levels))
+            print("Frontier size: {}".format(len(next_frontier)))
+            print("MinPos size: {}".format(len(min_pos)))
             frontier = next_frontier.copy()
             next_frontier = []
             while frontier:
@@ -380,32 +290,22 @@ if __name__ == "__main__":
                     else:
                         next_frontier.append(succ)
 
-            if evaluate_rule(i, body_candidate):
-                depth_first = False
-
-
         # Write the rule
         cd_fact_predicate = can_encoder_decoder.position_unary_pred_dict[i]
         for body_candidate in min_pos:
-            body = set()
-            variables_mask = number_to_mask(body_candidate[0])
-            unaries_tuple = body_candidate[1]
-            index_last_seen_variable = -1
-            for variable_index, variable_mask_value in enumerate(variables_mask):
-                if variable_mask_value == '1':
-                    index_last_seen_variable += 1
-                    var_y = variables[variable_index]
-                    body = body.union(set(path_to_root[var_y]))
-                    unaries_mask = number_to_mask(unaries_tuple[index_last_seen_variable])
-                    for index_unary_mask, unary_mask_values in enumerate(unaries_mask):
-                        if unary_mask_values == '1':
-                            body.add((var_y, type_pred, can_encoder_decoder.position_unary_pred_dict[relevant_positions[0][var_y][index_unary_mask]]))
+            body = set(base_graph)
+            for v_index in range(N):
+                var_y = relevant_variables[v_index]
+                unaries_mask = number_to_mask(body_candidate[v_index])
+                for index_unary_mask, unary_mask_values in enumerate(unaries_mask):
+                    if unary_mask_values == '1':
+                        body.add((var_y, type_pred, can_encoder_decoder.position_unary_pred_dict[relevant_positions[0][var_y][index_unary_mask]]))
             if args.encoding_scheme == "iclr22":
                 body, can_variable_to_data_variable, top_facts = iclr_encoder_decoder.unfold(body, cd_fact_predicate)
             # Process top facts
             for pair in top_facts:
                 [y1, y2] = list(pair)
-                body.append(y1, "TOP", y2)
+                body.append((y1, "TOP", y2))
             # Add body atoms
             body_atoms = []
             for (s, p, o) in body:
@@ -425,9 +325,8 @@ if __name__ == "__main__":
                     head = "<{}>[?X1,?X2]".format(
                         iclr_encoder_decoder.unary_canonical_to_input_predicate_dict[cd_fact_predicate])
             rule = head + " :- " + ", ".join(body_atoms) + " .\n"
-            print(rule)
-
             if args.output is not None:
                 output_file.write(rule + '\n')
 
     output_file.close()
+    print(datetime.datetime.now())

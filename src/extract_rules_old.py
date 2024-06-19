@@ -56,7 +56,7 @@ if __name__ == "__main__":
 
     print("Loading predicates from {}".format(args.predicates))
     data_binary_predicates, data_unary_predicates = load_predicates(args.predicates)
-    print("{} unary predicates and {} binary predicates in the signature.".format(
+    print("{} unary predicates and {} binary predicates in the original signature.".format(
         len(data_unary_predicates), len(data_binary_predicates)))
     if args.encoding_scheme == 'canonical':
         cd_unary_predicates = data_unary_predicates
@@ -71,7 +71,6 @@ if __name__ == "__main__":
     can_encoder_decoder = CanonicalEncoderDecoder(cd_unary_predicates, cd_binary_predicates)
 
     def evaluate_rule(head_predicate_position, edges, var_to_pred_pos):
-
         rule_dataset = []
         for c in model.num_colours:
             for (y,z) in edges[c]:
@@ -80,7 +79,7 @@ if __name__ == "__main__":
                 for p in var_to_pred_pos[y]:
                     rule_dataset.add((y, type_pred, p))
 
-        (features, node_to_row, edge_list, edge_colour_list) = can_encoder_decoder.encode_dataset(body)
+        (features, node_to_row, edge_list, edge_colour_list) = can_encoder_decoder.encode_dataset(rule_dataset)
         rule_data = Data(x=features, edge_index=edge_list, edge_type=edge_colour_list).to(device)
         gnn_output_rule = model(rule_data)
         output_node = nodes.const_node_dict["X1"]
@@ -163,8 +162,6 @@ if __name__ == "__main__":
                 if successors:
                     conj_next = successors.pop()
 
-                   #COME HERE!! Finish implementing optimised algorithm
-                # Then, modify it so that the number of rules in the body is limited.
 
 
 

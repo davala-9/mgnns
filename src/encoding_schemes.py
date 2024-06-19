@@ -5,6 +5,7 @@ import torch
 import numpy as np
 
 type_pred = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type'
+ineq_pred = "owl:differentFrom"
 
 class CanonicalEncoderDecoder:
 
@@ -167,6 +168,7 @@ class ICLREncoderDecoder:
 
     def __init__(self, load_from_document=None, unary_predicates=None, binary_predicates=None):
 
+        # important! there correspond to colours c1, c2, c3, c4 in the paper
         self.binary_canonical = {1: "binary-pred-1", 2: "binary-pred-2", 3: "binary-pred-3", 4: "binary-pred-4"}
         self.input_predicate_to_unary_canonical_dict = {}
         self.unary_canonical_to_input_predicate_dict = {}
@@ -282,129 +284,149 @@ class ICLREncoderDecoder:
         return self.data_predicate_to_arity[self.get_data_predicate(canonical_predicate)]
 
     def unfold(self, rule_body, unary_head_predicate):
-
-        # each variable in the canonical rule represents a constant, and then it corresponds to a variable in the data
-        # rule, or it represents a pair of constants (but not both), in which case it corresponds to a pair of variables
-        # in the data. These are determined by either the rule head, or by the connections of this variable to others in
-        # the canonical rule
-        can_variables_to_data_variables = {}
+        # each variable in the canonical rule corresponds to a unary node,
+        # in which case it should be matched to a single variable in the unfolded rule,
+        # or it represents a binary node,
+        # in which case it should be matched to a pair of variables in the unfolded rule.
+        # We deduce this inductively, by the connection of this variable to the head variable.
+        can_variables_to_unfolded_variables = {} # Maps a variable to a tuple of 1 or 2 variables
         new_body = []
 
-#       first, figure out the arity of the head variable, and assign corresponding variables in the data rule
+        # first, figure out the arity of the head variable, and assign corresponding variables in the data rule
         if self.associated_arity(unary_head_predicate) == 1:
-            can_variables_to_data_variables["X1"] = ["X1"]
+            can_variables_to_unfolded_variables["X1"] = ["X1"]
         else:
-            can_variables_to_data_variables["X1"] = ["X1", "X2"]
+            can_variables_to_unfolded_variables["X1"] = ["X1", "X2"]
 
         # if we encounter a unary predicate U(y) with y a binary variable, and we don't know which variables it is
         # associated to, we just delay processing it until the next round. This won't delay it indefinitely, since in
         # each round we always get to define one additional variable.
         next_round = rule_body
         new_variables_counter = 0
-        # Here we store sets of two elements {a,b} such that either R(a,b) or R(b,a) must appear in the body for some R
+        # Here we store sets of two variables {y,z} such that either R(y,z) or R(z,y) must appear in the body for some R
         top_facts = set()
 
         while next_round:
             this_round = next_round.copy()
             next_round = []
             for (s, p, o) in this_round:
-                if s in can_variables_to_data_variables:
+                if s in can_variables_to_unfolded_variables:
                     if p == type_pred:
-                        if self.associated_arity(o) == 1 and len(can_variables_to_data_variables[s]) == 1:
+                        if self.associated_arity(o) == 1 and len(can_variables_to_unfolded_variables[s]) == 1:
                             # Fact of the form A(x) in the data rule
-                            new_body.append((can_variables_to_data_variables[s], type_pred, self.get_data_predicate(o)))
-                        elif self.associated_arity(o) == 2 and len(can_variables_to_data_variables[s]) == 2:
+                            new_body.append((can_variables_to_unfolded_variables[s], type_pred, self.get_data_predicate(o)))
+                        elif self.associated_arity(o) == 2 and len(can_variables_to_unfolded_variables[s]) == 2:
                             # Fact of the form R(x,y) in the data rule
-                            new_body.append((can_variables_to_data_variables[s][0], self.get_data_predicate(o), can_variables_to_data_variables[s][1]))
+                            new_body.append((can_variables_to_unfolded_variables[s][0], self.get_data_predicate(o), can_variables_to_unfolded_variables[s][1]))
                         else:
                             raise Exception("Error: arity of variable does not match arity of predicate.")
+                    # This is the only case we need to cover inequalities. We wait until both variables are matched to unfolded variables
+                    elif p == ineq_pred:
+                        if o in can_variables_to_unfolded_variables:
+                            # Both variables need to be of the same type. Also, if both are binary, the corresponding
+                            # two pairs of unfolded variables must have one element in common and in the same position.
+                            if len(can_variables_to_unfolded_variables[s]) == 1:
+                                assert len(can_variables_to_unfolded_variables[o]) == 1
+                                new_body.append((can_variables_to_unfolded_variables[s][0], ineq_pred,
+                                                 can_variables_to_unfolded_variables[o][0]))
+                            else:
+                                assert len(can_variables_to_unfolded_variables[s]) == 2
+                                assert len(can_variables_to_unfolded_variables[o]) == 2
+                                if can_variables_to_unfolded_variables[s][0] == can_variables_to_unfolded_variables[o][0]:
+                                    new_body.append((can_variables_to_unfolded_variables[s][1], ineq_pred, can_variables_to_unfolded_variables[o][1]))
+                                else:
+                                    assert can_variables_to_unfolded_variables[s][1] == can_variables_to_unfolded_variables[o][1]
+                                    new_body.append((can_variables_to_unfolded_variables[s][0], ineq_pred, can_variables_to_unfolded_variables[o][0]))
+                        else:
+                            next_round.append((s, p, o))
                     else:
                         if p == self.binary_canonical[1]:
-                            if len(can_variables_to_data_variables[s]) == 1:
+                            if len(can_variables_to_unfolded_variables[s]) == 1:
                                 # Fact of the form Ec1(f(x),g(x,y)) in the canonical rule
-                                if o not in can_variables_to_data_variables:
+                                if o not in can_variables_to_unfolded_variables:
                                     new_variables_counter += 1
                                     y = "Y{}".format(new_variables_counter)
-                                    can_variables_to_data_variables[o] = [can_variables_to_data_variables[s][0], y]
-                                    top_facts.add(frozenset((can_variables_to_data_variables[s][0], y)))
+                                    can_variables_to_unfolded_variables[o] = [can_variables_to_unfolded_variables[s][0], y]
+                                    top_facts.add(frozenset((can_variables_to_unfolded_variables[s][0], y)))
                             else:
                                 # Fact of the form Ec1((g(x,y),f(x)) in the canonical rule
-                                if o not in can_variables_to_data_variables:
-                                    can_variables_to_data_variables[o] = [can_variables_to_data_variables[s][0]]
-                                top_facts.add(frozenset((can_variables_to_data_variables[s][0], can_variables_to_data_variables[s][1])))
+                                assert(len(can_variables_to_unfolded_variables[s])) == 2
+                                if o not in can_variables_to_unfolded_variables:
+                                    can_variables_to_unfolded_variables[o] = [can_variables_to_unfolded_variables[s][0]]
+                                top_facts.add(frozenset((can_variables_to_unfolded_variables[s][0], can_variables_to_unfolded_variables[s][1])))
                         elif p == self.binary_canonical[2]:
-                            if len(can_variables_to_data_variables[s]) == 1:
+                            if len(can_variables_to_unfolded_variables[s]) == 1:
                                 # Fact of the form Ec2(f(x),g(y,x)) in the canonical rule
-                                if o not in can_variables_to_data_variables:
+                                if o not in can_variables_to_unfolded_variables:
                                     new_variables_counter += 1
                                     y = "Y{}".format(new_variables_counter)
-                                    can_variables_to_data_variables[o] = [y, can_variables_to_data_variables[s][0]]
-                                    top_facts.add(frozenset((can_variables_to_data_variables[s][0], y)))
+                                    can_variables_to_unfolded_variables[o] = [y, can_variables_to_unfolded_variables[s][0]]
+                                    top_facts.add(frozenset((can_variables_to_unfolded_variables[s][0], y)))
                             else:
                                 # Fact of the form Ec2((g(x,y),f(y)) in the canonical rule
-                                if o not in can_variables_to_data_variables:
-                                    can_variables_to_data_variables[o] = [can_variables_to_data_variables[s][1]]
-                                top_facts.add(frozenset((can_variables_to_data_variables[s][0], can_variables_to_data_variables[s][1])))
+                                if o not in can_variables_to_unfolded_variables:
+                                    can_variables_to_unfolded_variables[o] = [can_variables_to_unfolded_variables[s][1]]
+                                top_facts.add(frozenset((can_variables_to_unfolded_variables[s][0], can_variables_to_unfolded_variables[s][1])))
                         elif p == self.binary_canonical[3]:
                             # Fact of the form Ec3(g(x,y),g(y,x)) in the canonical rule
-                            assert len(can_variables_to_data_variables[s]) == 2
-                            if o not in can_variables_to_data_variables:
-                                can_variables_to_data_variables[o] = [can_variables_to_data_variables[s][1],
-                                                                      can_variables_to_data_variables[s][0]]
-                            top_facts.add(frozenset((can_variables_to_data_variables[s][0], can_variables_to_data_variables[s][1])))
+                            assert len(can_variables_to_unfolded_variables[s]) == 2
+                            if o not in can_variables_to_unfolded_variables:
+                                can_variables_to_unfolded_variables[o] = [can_variables_to_unfolded_variables[s][1],
+                                                                      can_variables_to_unfolded_variables[s][0]]
+                            top_facts.add(frozenset((can_variables_to_unfolded_variables[s][0], can_variables_to_unfolded_variables[s][1])))
                         elif p == self.binary_canonical[4]:
                             # Fact of the form Ec4(f(x),f(y)) in the canonical rule
-                            assert len(can_variables_to_data_variables[s]) == 1
-                            if o not in can_variables_to_data_variables:
+                            assert len(can_variables_to_unfolded_variables[s]) == 1
+                            if o not in can_variables_to_unfolded_variables:
                                 new_variables_counter += 1
                                 y = "Y{}".format(new_variables_counter)
-                                can_variables_to_data_variables[o] = [y]
-                                top_facts.add(frozenset((can_variables_to_data_variables[s][0],  y)))
+                                can_variables_to_unfolded_variables[o] = [y]
+                                top_facts.add(frozenset((can_variables_to_unfolded_variables[s][0],  y)))
                         else:
                             raise Exception("Error: binary predicate not corresponding to one of the four colours")
-                elif o in can_variables_to_data_variables:
+                elif o in can_variables_to_unfolded_variables:
                     assert(p != type_pred)
                     if p == self.binary_canonical[1]:
-                        if len(can_variables_to_data_variables[o]) == 1:
+                        if len(can_variables_to_unfolded_variables[o]) == 1:
                             # Fact of the form Ec1(g(x,y),f(x)) in the canonical rule
-                            if s not in can_variables_to_data_variables:
+                            if s not in can_variables_to_unfolded_variables:
                                 new_variables_counter += 1
                                 y = "Y{}".format(new_variables_counter)
-                                can_variables_to_data_variables[s] = [can_variables_to_data_variables[o][0], y]
-                                top_facts.add(frozenset((can_variables_to_data_variables[o][0], y)))
+                                can_variables_to_unfolded_variables[s] = [can_variables_to_unfolded_variables[o][0], y]
+                                top_facts.add(frozenset((can_variables_to_unfolded_variables[o][0], y)))
                         else:
                             # Fact of the form Ec1(f(x),g(x,y)) in the canonical rule
-                            if s not in can_variables_to_data_variables:
-                                can_variables_to_data_variables[s] = [can_variables_to_data_variables[o][0]]
-                            top_facts.add(frozenset((can_variables_to_data_variables[o][0], can_variables_to_data_variables[o][1])))
+                            if s not in can_variables_to_unfolded_variables:
+                                can_variables_to_unfolded_variables[s] = [can_variables_to_unfolded_variables[o][0]]
+                            top_facts.add(frozenset((can_variables_to_unfolded_variables[o][0], can_variables_to_unfolded_variables[o][1])))
                     elif p == self.binary_canonical[2]:
-                        if len(can_variables_to_data_variables[o]) == 1:
+                        if len(can_variables_to_unfolded_variables[o]) == 1:
                             # Fact of the form Ec2((g(x,y),f(y))in the canonical rule
-                            if s not in can_variables_to_data_variables:
+                            if s not in can_variables_to_unfolded_variables:
                                 new_variables_counter += 1
                                 y = "Y{}".format(new_variables_counter)
-                                can_variables_to_data_variables[s] = [y, can_variables_to_data_variables[o][0]]
-                                top_facts.add(frozenset((can_variables_to_data_variables[o][0], y)))
+                                can_variables_to_unfolded_variables[s] = [y, can_variables_to_unfolded_variables[o][0]]
+                                top_facts.add(frozenset((can_variables_to_unfolded_variables[o][0], y)))
                         else:
                             # Fact of the form Ec2(f(x),g(y,x))  in the canonical rule
-                            if s not in can_variables_to_data_variables:
-                                can_variables_to_data_variables[s] = [can_variables_to_data_variables[o][1]]
-                            top_facts.add(frozenset((can_variables_to_data_variables[o][0], can_variables_to_data_variables[o][1])))
+                            if s not in can_variables_to_unfolded_variables:
+                                can_variables_to_unfolded_variables[s] = [can_variables_to_unfolded_variables[o][1]]
+                            top_facts.add(frozenset((can_variables_to_unfolded_variables[o][0], can_variables_to_unfolded_variables[o][1])))
                     elif p == self.binary_canonical[3]:
                         # Fact of the form Ec3(g(x,y),g(y,x)) in the canonical rule
-                        assert len(can_variables_to_data_variables[o]) == 2
-                        if s not in can_variables_to_data_variables:
-                            can_variables_to_data_variables[s] = [can_variables_to_data_variables[o][1],
-                                                                  can_variables_to_data_variables[o][0]]
-                        top_facts.add(frozenset((can_variables_to_data_variables[o][0], can_variables_to_data_variables[o][1])))
+                        assert len(can_variables_to_unfolded_variables[o]) == 2
+                        if s not in can_variables_to_unfolded_variables:
+                            can_variables_to_unfolded_variables[s] = [can_variables_to_unfolded_variables[o][1],
+                                                                  can_variables_to_unfolded_variables[o][0]]
+                        top_facts.add(frozenset((can_variables_to_unfolded_variables[o][0], can_variables_to_unfolded_variables[o][1])))
                     elif p == self.binary_canonical[4]:
                         # Fact of the form Ec4(f(x),f(y)) in the canonical rule
-                        assert len(can_variables_to_data_variables[o]) == 1
-                        if s not in can_variables_to_data_variables:
+                        assert len(can_variables_to_unfolded_variables[o]) == 1
+                        if s not in can_variables_to_unfolded_variables:
                             new_variables_counter += 1
                             y = "Y{}".format(new_variables_counter)
-                            can_variables_to_data_variables[s] = [y]
-                            top_facts.add(frozenset((can_variables_to_data_variables[o][0], y)))
+                            can_variables_to_unfolded_variables[s] = [y]
+                            top_facts.add(frozenset((can_variables_to_unfolded_variables[o][0], y)))
                     else:
                         raise Exception("Error: binary predicate not corresponding to one of the four colours")
                 else:
@@ -413,7 +435,7 @@ class ICLREncoderDecoder:
         for (s, p, o) in new_body:
             if frozenset((s, o)) in top_facts:
                 top_facts.remove(frozenset((s, o)))
-        return new_body, can_variables_to_data_variables, top_facts
+        return new_body, can_variables_to_unfolded_variables, top_facts
 
 
     # This is a rather specific function. Given two data variables y1 and y2, this returns a single variable if y1 y2

@@ -16,9 +16,12 @@ if __name__ == "__main__":
     experiment_type = configuration["experiment_type"]
     dataset_names = configuration["dataset_names"]
     train_graph = configuration["train_graph"] 
+    valid_graph = configuration["valid_graph"]
     test_graph = configuration["test_graph"] 
     use_dummy_constants = configuration["use_dummy_constants"]=="True" 
     train_examples = configuration["train_examples"] 
+    valid_positive_examples = configuration["valid_positive_examples"] 
+    valid_negative_examples = configuration["valid_negative_examples"] 
     test_positive_examples = configuration["test_positive_examples"] 
     test_negative_examples = configuration["test_negative_examples"] 
     encoding_scheme = configuration["encoding_scheme"]
@@ -27,8 +30,10 @@ if __name__ == "__main__":
     explanation_threshold = configuration["explanation_threshold"] 
     non_negative_weights = configuration["non_negative_weights"]
     train = configuration["train"]=="True" 
+    valid = configuration["valid"]=="True"
     test = configuration["test"]=="True" 
     explain = configuration["explain"]=="True" 
+    minimal_rule = configuration["minimal_rule"]=="True"
 
 
 
@@ -59,7 +64,23 @@ if __name__ == "__main__":
                             '--predicates', exp_dir + "data/{}/{}/predicates.csv".format(experiment_type, dataset_name),
                             '--aggregation', aggregation,
                             '--non-negative-weights', non_negative_weights ])
-        
+
+        #  VALIDATE
+        if valid: 
+            print("Validating...")
+            subprocess.run(['python',
+                            mgnn_dir + "test.py",
+                            '--load-model-name', exp_dir + "models/{}.pt".format(experiment_name),
+                            '--canonical-encoder-file', exp_dir + "encoders/{}".format(experiment_name) + "_canonical.tsv",
+                            '--iclr22-encoder-file', exp_dir + "encoders/{}".format(experiment_name) + "_iclr22.tsv",
+                            '--predicates', exp_dir + "data/{}/{}/predicates.csv".format(experiment_type, dataset_name),
+                            '--test-graph', exp_dir + "data/{}/{}/{}".format(experiment_type, dataset_name, valid_graph),
+                            '--test-positive-examples', exp_dir + "data/{}/{}/{}".format(experiment_type, dataset_name, valid_positive_examples),
+                            '--test-negative-examples', exp_dir + "data/{}/{}/{}".format(experiment_type, dataset_name, valid_negative_examples),
+                            '--output', exp_dir + "metrics/{}/{}/{}.txt".format(experiment_type, dataset_name, experiment_name),
+                            '--print-entailed-facts', exp_dir + "predictions/{}/{}.tsv".format(dataset_name, experiment_name),
+                            '--encoding-scheme', encoding_scheme])
+
         #  TEST 
         if test: 
             print("Testing...")
@@ -80,7 +101,7 @@ if __name__ == "__main__":
         #  EXPLAIN FACTS 
         if explain: 
             print("Computing fact explanations...")
-            subprocess.run(['python',
+            argument = ['python',
                             mgnn_dir + "fact_explanation.py",
                             '--load-model-name', exp_dir + "models/{}.pt".format(experiment_name),
                             '--canonical-encoder-file', exp_dir + "encoders/{}".format(experiment_name) + "_canonical.tsv",
@@ -90,5 +111,8 @@ if __name__ == "__main__":
                             '--predicates', exp_dir + "data/{}/{}/predicates.csv".format(experiment_type, dataset_name),
                             '--dataset', exp_dir + "data/{}/{}/{}".format(experiment_type, dataset_name, test_graph),
                             '--facts', exp_dir + "predictions/{}/{}.tsv".format(dataset_name, experiment_name),
-                            '--output', exp_dir + "explanations/{}/{}.txt".format(dataset_name, experiment_name)])
+                            '--output', exp_dir + "explanations/{}/{}.txt".format(dataset_name, experiment_name)]
+            if minimal_rule:
+                argument.append('--minimal-rule')
+            subprocess.run(argument)
 

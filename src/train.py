@@ -45,7 +45,10 @@ parser.add_argument('--aggregation',
                     help='Aggregation function to be used by the model')
 parser.add_argument('--train-with-dummies',
                     default=False,
-                    action='store_true')
+                    action='store_true'),
+# parser.add_argument('--model-clamping',
+#                     default=None,
+#                     help='Clamp to zero all weights with absolute value under this number at the end')
 parser.add_argument('--non-negative-weights',
                     choices=['True', 'False'],
                     help='Restrict matrix weights so that they are non-monotonic')
@@ -231,5 +234,23 @@ if __name__ == "__main__":
         else:
             num_bad_iterations = 0
             min_loss = loss
+
+    # def threshold_matrix_values(matrix: torch.tensor, threshold: float, negative_only=False):
+    #     below_threshold_mask = matrix <= -threshold
+    #     above_threshold_mask = matrix >= threshold
+    #     if negative_only:
+    #         outside_threshold_mask = torch.logical_or(below_threshold_mask, matrix >= 0)
+    #     else:
+    #         outside_threshold_mask = torch.logical_or(below_threshold_mask, above_threshold_mask)
+    #     inside_threshold_mask = torch.logical_not(outside_threshold_mask)
+    #     matrix[inside_threshold_mask] = 0
+    #
+    # #Model clamping
+    # if args.model_clamping:
+    #     for layer in range(model.num_layers + 1):
+    #         mat = model.matrix_A(layer)
+    #         threshold_matrix_values(model.matrix_A(layer), float(args.model_clamping))
+    #         for colour in range(model.num_colours + 1):
+    #             threshold_matrix_values(model.matrix_B(layer, colour), float(args.model_clamping))
 
     torch.save(model, args.model_folder + '/' + saved_model_name + '.pt')
