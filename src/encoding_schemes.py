@@ -63,8 +63,10 @@ class CanonicalEncoderDecoder:
             else:  # Fact of form R(a,b), written (a R b)
                 if RDF_triple[1] not in self.binary_pred_colour_dict:
                     sys.exit(f"Predicate {RDF_triple[1]} not in the list of binary predicates recognised by this encoder.")
-                nodename_feature_dict[RDF_triple[0]] = torch.zeros(delta, dtype=torch.float)
-                nodename_feature_dict[RDF_triple[2]] = torch.zeros(delta, dtype=torch.float)
+                if RDF_triple[0] not in nodename_feature_dict:
+                    nodename_feature_dict[RDF_triple[0]] = torch.zeros(delta, dtype=torch.float)
+                if RDF_triple[2] not in nodename_feature_dict:
+                    nodename_feature_dict[RDF_triple[2]] = torch.zeros(delta, dtype=torch.float)
                 edges.add((RDF_triple[0], RDF_triple[2], RDF_triple[1]))
 
         features = torch.FloatTensor(torch.stack(list(nodename_feature_dict.values())))
