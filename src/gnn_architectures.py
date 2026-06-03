@@ -26,9 +26,10 @@ class EC_GCNConv(MessagePassing):
     def __init__(self, in_channels, out_channels, edge_colours, aggregation):
 
         self.aggr = aggregation
-        if aggregation not in {"sum", "max"}:
-            raise ValueError(f"Unsupported aggregation mode: {aggregation!r}")
-        super(EC_GCNConv, self).__init__(aggr=aggregation)
+        aggr_name = getattr(aggregation, "value", aggregation)
+        if aggr_name not in {"sum", "max"}:
+            raise ValueError(f"Unsupported aggregation mode: {aggr_name!r}")
+        super(EC_GCNConv, self).__init__(aggr=aggr_name)
         self.weights = Parameter(torch.Tensor(edge_colours, out_channels, in_channels))
         self.weights.data.normal_(0, 0.001)
         self.in_channels = in_channels
