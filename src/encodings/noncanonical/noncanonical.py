@@ -26,7 +26,7 @@ class NonCanonicalEncoder(ABC):
         pass
 
     @abstractmethod
-    def unfold(self, can_conj: TreeShapedConjunction, head_is_binary: bool, internal_encoder: CanonicalEncoderDecoder):
+    def unfold(self, can_conj: TreeShapedConjunction, internal_encoder: CanonicalEncoderDecoder, **kwargs):
         pass
 
 

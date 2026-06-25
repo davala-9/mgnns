@@ -1,7 +1,10 @@
+from sympy.physics.units import second
+
 from src.encodings.canonical import CanonicalEncoderDecoder
 from src.encodings.noncanonical.noncanonical import NonCanonicalEncoder
 from bidict import bidict
 
+from src.rule_extraction.fact_explanation import FactExplainer
 from src.rule_extraction.tree_shaped_conjunction import TreeShapedConjunction, Variable
 from src.utils.utils import TYPE_PRED
 
@@ -12,6 +15,9 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
     col2 = "binary-pred-2"
     col3 = "binary-pred-3"
     col4 = "binary-pred-4"
+
+    # This is a placeholder predicate used for unfoldings. It simply says "these two appear together in the dataset"
+    TOP_PREDICATE = "top-pred"
 
     def __init__(self, load_from_document=None, unary_predicates=None, binary_predicates=None):
         self.canonical_binary_predicates = [self.col1, self.col2, self.col3, self.col4]
@@ -130,13 +136,24 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
     # Note that we only unfold canonic unary atoms, (which turn into either unary or binary data atoms)
     # Canonical binary atoms are used only to choose the correct unfolding function.
     # Returns the unfolded conjunction and a list of the variables in the head (might be one or two)
-    def unfold(self, can_conj: TreeShapedConjunction, head_is_binary: bool, internal_encoder: CanonicalEncoderDecoder):
+    def unfold(self, can_conj: TreeShapedConjunction, internal_encoder: CanonicalEncoderDecoder, **kwargs):
+
+        # COME HERE!! LEAVE PART OF THIS TEXT
+        # because we need to decode the colours (the edges), dealing with top-predicates is necessary
+        # a naive method just adds all
+        # an optimisation is to (1) have "top" facts and (2) store mappings of data_variables to constants
+        # then use a method to deal with the top facts. This is more elegant that having the "isBinaryHead" as general
+        # Also, make it so that TreeShapedConjunctions cannot be empty. The use case was the lattice explorations,
+        # but one can have an empty tree-shaped conjunction by having a variable with no children and mask 0, which is
+        # in fact how we actually represent such empty conjunctions.
+
+        fe: FactExplainer = kwargs.get("explainer")
+        if fe is None:
+            raise ValueError("ICLR22EncDec requires a FactExplainer to unfold")
 
         data_conj = [] # Not necessarily tree-shaped
 
-        # For binary atoms involving colour c4, we don't know which predicate generated this connection, so instead we
-        # return a "top" predicate, to be interpreted as a two constants being connected.
-        top_predicate = "top-pred"
+        data_var_to_const_ind = {} # Not strictly necessary but helps debug and simplifies dealing with top predicates
 
         # Data variable list
         data_var_prefix = "X"
@@ -145,12 +162,11 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
             nonlocal data_var_counter
             data_var_counter += 1
             return data_var_prefix + str(data_var_counter)
-
-        # Find and define root variables
         root_variables = [data_var_prefix + str(data_var_counter)]
         if head_is_binary:
             second_root_data_var = new_variable()
             root_variables.append(second_root_data_var)
+        can_conj
 
         if can_conj.is_empty():
             return data_conj, root_variables # Return the empty conjunction if the tree-shaped conjunction is empty.
@@ -167,6 +183,8 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
                 can_predicate = internal_encoder.unary_pred_position_dict.inverse[feat]
                 data_predicate = self.input_predicate_to_unary_canonical_dict.inverse[can_predicate]
                 data_conj.append((first_data_var, data_predicate, second_data_var))
+            if not can_var.get_feature_list():
+                data_conj.append((first_data_var, self.TOP_PREDICATE, second_data_var))
             # Next, unfold children
             for (_, col, _), child_var in can_var.children.items():
                 bin_pred = internal_encoder.binary_pred_colour_dict.inverse[col]
@@ -202,7 +220,7 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
                     # The target must be another unary node.
                     new_data_var = new_variable()
                     # A top fact must be added to reflect these two variables are connected.
-                    data_conj.append((data_var, top_predicate, new_data_var))
+                    data_conj.append((data_var, self.TOP_PREDICATE, new_data_var))
                     unfold_variable_for_single(child_var,new_data_var)
                 else:
                     raise ValueError(f"Binary fact in canonical atom uses predicate {bin_pred} which is not valid.")
@@ -212,7 +230,24 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
         else:
             unfold_variable_for_single(can_conj.root_node, root_variables[0])
 
+        data_conj = list(dict.fromkeys(data_conj)) # Remove potential duplicates
+
         return data_conj, root_variables
+
+
+    def process_top_predicate(self,data_conj,DATASET):
+        accounted_couples = set()
+        # Note variables that already appear together in a fact of the rule
+        for s, p, o in data_conj:
+            if p != TYPE_PRED and p != self.TOP_PREDICATE:
+                accounted_couples.add({s,o})
+        new_data_conj = []
+        for s, p, o in data_conj:
+            if p == self.TOP_PREDICATE and {s,o} not in accounted_couples:
+
+
+
+
 
 
     # This is a rather specific function. Given two data variables y1 and y2, this returns a single variable if y1 y2

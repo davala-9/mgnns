@@ -42,11 +42,9 @@ class IdentityEncoderDecoder(NonCanonicalEncoder):
         s, p, o = fact
         return s, p, o
 
-    def unfold(self, can_conj: TreeShapedConjunction, head_is_binary: bool, internal_encoder: CanonicalEncoderDecoder):
+    def unfold(self, can_conj: TreeShapedConjunction, internal_encoder: CanonicalEncoderDecoder,**kwargs):
 
         data_conj = []  # Not necessarily tree-shaped
-
-        assert not head_is_binary # We should never be unfolding binary facts if the transformation is based on identity
 
         # Data variable list
         data_var_prefix = "X"
