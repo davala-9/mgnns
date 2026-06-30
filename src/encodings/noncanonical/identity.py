@@ -56,9 +56,6 @@ class IdentityEncoderDecoder(NonCanonicalEncoder):
             data_var_counter += 1
             return data_var_prefix + str(data_var_counter)
 
-        if can_conj.is_empty():
-            return data_conj, root_variables   # Return the empty conjunction if the tree-shaped conjunction is empty.
-
         def unfold_variable(can_var: Variable, data_var: str):
             for feat in can_var.get_feature_list():
                 can_predicate = internal_encoder.unary_pred_position_dict.inverse[feat]

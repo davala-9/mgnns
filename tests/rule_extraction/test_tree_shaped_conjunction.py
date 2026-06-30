@@ -20,8 +20,6 @@ class TestVariable:
 
 
 class TestWalk:
-    def test_walk_none(self):
-        assert list(walk(None)) == []
 
     def test_walk_single_node(self):
         root = Variable(BitSet.from_subset(3, {0}))
@@ -59,29 +57,16 @@ class TestWalk:
 
 
 class TestTreeShapedConjunction:
-    def test_empty_tree(self):
-        tree = TreeShapedConjunction(
-            n_colours=3,
-        )
-        assert tree.is_empty()
-        assert len(tree) == 0
-        assert list(tree.walk()) == []
 
     def test_tree_with_only_root(self):
-        tree = TreeShapedConjunction(
-            n_colours=3,
-        )
         root = Variable(BitSet.from_subset(5, {0}))
-        tree.root_node = root
-        assert not tree.is_empty()
+        tree = TreeShapedConjunction(root, n_colours=3)
         assert len(tree) == 1
         assert list(tree.walk()) == [root]
 
     def test_len_counts_all_nodes(self):
-        tree = TreeShapedConjunction(
-            n_colours=3,
-        )
         root = Variable(BitSet.from_subset(5, {0}))
+        tree = TreeShapedConjunction(root, n_colours=3)
         child1 = Variable(BitSet.from_subset(5, {1}))
         child2 = Variable(BitSet.from_subset(5, {2}))
         grandchild = Variable(BitSet.from_subset(5, {3}))
@@ -92,11 +77,8 @@ class TestTreeShapedConjunction:
         assert len(tree) == 4
 
     def test_walk_delegates_to_root_node(self):
-        tree = TreeShapedConjunction(
-            n_colours=3,
-        )
         root = Variable(BitSet.from_subset(5, {0}))
         child = Variable(BitSet.from_subset(5, {1}))
         root.children[(0,0,0)] = child
-        tree.root_node = root
+        tree = TreeShapedConjunction(root, n_colours=3)
         assert list(tree.walk()) == [root, child]

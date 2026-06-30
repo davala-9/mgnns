@@ -99,8 +99,7 @@ def test_unfold_simple_tree():
     variable_a.children[(0,0,0)] = variable_b
     variable_a.children[(1,1,1)] = variable_c
     variable_c.children[(0,0,1)] = variable_d
-    conj = TreeShapedConjunction(2)
-    conj.root_node = variable_a
+    conj = TreeShapedConjunction(variable_a,2)
 
     data_conj, root_vars = external.unfold(conj, head_is_binary=False, internal_encoder=internal)
 
@@ -125,7 +124,9 @@ def test_unfold_empty():
         unary_predicates=["A"],
         binary_predicates=["R"]
     )
-    conj = TreeShapedConjunction(1)
-    rule, head_vars = encoder.unfold(conj, head_is_binary=False, internal_encoder=internal)
+    feature_mask_a = BitSet.from_subset(dimension=1,subset=set())
+    variable_a = Variable(feature_mask_a,2)
+    conj = TreeShapedConjunction(variable_a,1)
+    rule, head_vars = encoder.unfold(conj, internal_encoder=internal)
 
     assert rule == []

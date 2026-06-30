@@ -1,16 +1,15 @@
 from src.utils.bitset import BitSet
 import numpy as np
 
+
+# TODO: combine these two classes. No point in having them separate
 class TreeShapedConjunction:
-    def __init__(self, n_colours):
+    def __init__(self, root_node, n_colours):
         self.n_colours = n_colours
-        self.root_node = None
+        self.root_node = root_node
 
     def walk(self):
         return walk(self.root_node)
-
-    def is_empty(self):
-        return self.root_node is None
 
     def __len__(self):
         return  sum(1 for _ in self.walk())
@@ -28,9 +27,7 @@ class Variable:
 
 # Note that this is a generator function
 def walk(node: Variable):
-    if node is None:
-        return
-    children_snapshot = list(node.children.values())  # snapshot BEFORE yielding
+    children_snapshot = list(node.children.values())  # snapshot BEFORE yielding, in case it's modified.
     yield node
     for child in children_snapshot:
         yield from walk(child)
