@@ -9,7 +9,7 @@ from src.model.cd_graph import TraceCollector, CDGraph
 from src.model.gnn_architectures import GNN
 from src.model.gnn_transformation import apply_model, apply_nc_decoder
 from src.rule_extraction.tree_shaped_conjunction import TreeShapedConjunction, Variable, walk
-from src.rule_extraction.fact_explanation import FactExplainer
+from src.rule_extraction.fact_explanation import FactExplainer, FactContext
 from src.utils.utils import TYPE_PRED
 from src.utils.bitset import BitSet
 
@@ -118,7 +118,6 @@ def ex_1_1_activation_2():
 
 # Assuming here a canonical encoding with signature A, B (unary), R, S (binary)
 def make_mock_fe_1():
-    fact = ("a",TYPE_PRED,"A")
     trace = TraceCollector()
     external_encoder = IdentityEncoderDecoder(load_from_document=None, unary_predicates=["A","B"],
                                               binary_predicates=["R","S"])
@@ -135,6 +134,10 @@ def make_mock_fe_1():
     assert torch.equal(trace.fl2,ex_1_1_activation_2())
     fe = FactExplainer(device,model,threshold,trace,external_encoder,internal_encoder)
     return fe
+
+def get_fact_ex1():
+    return "a",TYPE_PRED, "A"
+
 
 # ----------------------------------------------------------------------------------------------------------
 # EXAMPLE 2 - ICLR22 ENCODING
@@ -291,7 +294,6 @@ def ex_2_2_activation_2():
 
 # Assuming here a canonical encoding with signature A, B (unary), R, S (binary)
 def make_mock_fe_2():
-    fact = ("a","R","b")
     trace = TraceCollector()
     external_encoder = ICLREncoderDecoder(load_from_document=None, unary_predicates=["A"],
                                               binary_predicates=["R","S"])
@@ -313,83 +315,117 @@ def make_mock_fe_2():
     fe = FactExplainer(device,model,threshold,trace,external_encoder,internal_encoder)
     return fe
 
+def get_fact_ex2():
+    return "a", "R", "b"
 
-class TestBasicExplanation:
 
-    @pytest.mark.skip(reason="no more BasicExp class; needs merging with ExplainFact test")
-    # We'd expect a conjunction S(x,y) and R(x,z) with both y and z mapped to b; with y at level 1 and z at level 0.
-    # Explanation: node for a gathers info about itself and R.b in first layer, then about S.b in second layer
+class TestFactContext:
+
+    def test_fact_context_ex1(self):
+        fe = make_mock_fe_1()
+        fact = get_fact_ex1()
+        fact_context = FactContext(fact, fe.external_encoder, fe.internal_encoder, fe.node_to_index)
+        assert fact_context.cd_ent1 == "a"
+        assert fact_context.cd_ent3 == "A"
+        assert fact_context.cd_fact_const_index == 0
+        assert fact_context.cd_fact_pred_pos == 0
+
+    def test_fact_context_ex2(self):
+        fe = make_mock_fe_2()
+        fact = get_fact_ex2()
+        fact_context = FactContext(fact, fe.external_encoder, fe.internal_encoder, fe.node_to_index)
+        assert fact_context.cd_ent1 == "term-for-a-b"
+        assert fact_context.cd_ent3 == "unary-for-R"
+        assert fact_context.cd_fact_const_index == 1
+        assert fact_context.cd_fact_pred_pos == 1
+
+
+class TestFactExplainer:
+
+    def test_initialisation_ex1(self):
+        fe = make_mock_fe_1()
+        assert fe.node_to_index == {"a": 0, "b": 1, "c": 2}
+
     def test_basic_explanation_ex1(self):
         fe = make_mock_fe_1()
-
-
-        # Verify the TreeShapedConjunction
-        assert isinstance(ba.conjunction, TreeShapedConjunction)
-        assert len(ba.conjunction) == 3
-        vx = ba.conjunction.root_node
+        fc = FactContext(get_fact_ex1(), fe.external_encoder, fe.internal_encoder, fe.node_to_index)
+        conjunction, var_const_idx, var_layer_mask = fe.get_basic_explanation(fc)
+        assert isinstance(conjunction, TreeShapedConjunction)
+        assert len(conjunction) == 3
+        vx = conjunction.root_node
         assert isinstance(vx, Variable)
         assert vx.features == BitSet.from_subset(dimension=2, subset={0})
         assert vx.level == 2
-        assert (2,1,0) in vx.children # In layer 2, we introduce a child variable via S (1) for position 0
-        assert (1,0,0) in vx.children # In layer 1, we introduce a child variable via R (0) for position 0
-        vy = vx.children[(2,1,0)]
+        assert (2, 1, 0) in vx.children  # In layer 2, we introduce a child variable via S (1) for position 0
+        assert (1, 0, 0) in vx.children  # In layer 1, we introduce a child variable via R (0) for position 0
+        vy = vx.children[(2, 1, 0)]
         assert isinstance(vy, Variable)
         assert vy.features == BitSet.from_subset(dimension=2, subset={0})
         assert vy.level == 1
         assert vy.children == {}
-        vz = vx.children[(1,0,0)]
+        vz = vx.children[(1, 0, 0)]
         assert isinstance(vz, Variable)
         assert vz.features == BitSet.from_subset(dimension=2, subset={0})
         assert vz.level == 0
         assert vz.children == {}
 
         # Verify the mapping of variables to constants (the paper's \nu)
-        assert vx in ba.var_const_idx
-        assert ba.var_const_idx[vx] == 0
-        assert vy in ba.var_const_idx
-        assert ba.var_const_idx[vy] == 1
-        assert vz in ba.var_const_idx
-        assert ba.var_const_idx[vz] == 1
+        assert vx in var_const_idx
+        assert var_const_idx[vx] == 0
+        assert vy in var_const_idx
+        assert var_const_idx[vy] == 1
+        assert vz in var_const_idx
+        assert var_const_idx[vz] == 1
 
         # Verify the (var,layer) to mask mapping (the paper's \mu)
         # These expected results were done by hand.
-        assert ba.var_layer_mask[(vx,2)] == BitSet.from_subset(2, {0})
-        assert ba.var_layer_mask[(vx,1)] == BitSet.from_subset(4, {0,1})
-        assert ba.var_layer_mask[(vx,0)] == BitSet.from_subset(2, {0})
-        assert (vy,2) not in ba.var_layer_mask
-        assert ba.var_layer_mask[(vy, 1)] == BitSet.from_subset(4, {0})
-        assert ba.var_layer_mask[(vy, 0)] == BitSet.from_subset(2, {0})
-        assert (vz,2) not in ba.var_layer_mask
-        assert (vz,1) not in ba.var_layer_mask
-        assert ba.var_layer_mask[(vz, 0)] == BitSet.from_subset(2, {0})
+        assert var_layer_mask[(vx, 2)] == BitSet.from_subset(2, {0})
+        assert var_layer_mask[(vx, 1)] == BitSet.from_subset(4, {0, 1})
+        assert var_layer_mask[(vx, 0)] == BitSet.from_subset(2, {0})
+        assert (vy, 2) not in var_layer_mask
+        assert var_layer_mask[(vy, 1)] == BitSet.from_subset(4, {0})
+        assert var_layer_mask[(vy, 0)] == BitSet.from_subset(2, {0})
+        assert (vz, 2) not in var_layer_mask
+        assert (vz, 1) not in var_layer_mask
+        assert var_layer_mask[(vz, 0)] == BitSet.from_subset(2, {0})
 
-    @pytest.mark.skip(reason="no more BasicExp class; needs merging with ExplainFact test")
-    # The conjunction should have 4 variables: x0 (for ab), x1 (for a), x2 (for ba), x3 (for az)
-    def test_basic_explanation_ex2(self):
+    def test_fact_explainer_ex1(self):
+        fe = make_mock_fe_1()
+        rule = fe.explain_fact(get_fact_ex1())
+        head, body = rule.rstrip(' .\n').split(' :- ')
+        body_atoms = set(body.split(', '))
+        assert head ==  "<A>[?X0]"
+        assert body_atoms == {"<A>[?X0]", "<S>[?X1,?X0]", "<A>[?X1]", "<R>[?X2,?X0]", "<A>[?X2]"}
+
+
+    def test_initialisation_ex2(self):
         fe = make_mock_fe_2()
-        ba = BasicExplanation(fe)
+        assert fe.node_to_index == {"a": 0, "term-for-a-b":1, "b":2, "term-for-b-a":3}
 
-        # Verify the TreeShapedConjunction
-        assert isinstance(ba.conjunction, TreeShapedConjunction)
-        assert len(ba.conjunction) == 4
-
-        vx = ba.conjunction.root_node # represents ab
+    def test_fact_basic_explanation_ex2(self):
+        # The conjunction should have 4 variables: x0 (for ab), x1 (for a), x2 (for ba), x3 (for az)
+        fe = make_mock_fe_2()
+        fc = FactContext(get_fact_ex2(), fe.external_encoder, fe.internal_encoder, fe.node_to_index)
+        conjunction, var_const_idx, var_layer_mask = fe.get_basic_explanation(fc)
+        assert isinstance(conjunction, TreeShapedConjunction)
+        assert len(conjunction) == 4
+        vx = conjunction.root_node  # represents ab
         assert isinstance(vx, Variable)
         assert vx.features == BitSet.from_subset(dimension=3, subset={})
         assert vx.level == 2
-        assert (2,0,0) in vx.children # In layer 2, we introduce a child variable via c1 (0) for position 0
-        vy = vx.children[(2,0,0)] # represents a
+        assert (2, 0, 0) in vx.children  # In layer 2, we introduce a child variable via c1 (0) for position 0
+        vy = vx.children[(2, 0, 0)]  # represents a
         assert isinstance(vy, Variable)
         assert vy.features == BitSet.from_subset(dimension=3, subset={0})
         assert vy.level == 1
-        assert (1,0,2) in vy.children # In layer 1, we introduce a child variable via c1 (0) for position 2
-        vz = vy.children[(1,0,2)] # represents az
+        assert (1, 0, 2) in vy.children  # In layer 1, we introduce a child variable via c1 (0) for position 2
+        vz = vy.children[(1, 0, 2)]  # represents az
         assert isinstance(vz, Variable)
         assert vz.features == BitSet.from_subset(dimension=3, subset={2})
         assert vz.level == 0
         assert vz.children == {}
-        assert (2,2,1) in vx.children # In layer 2, we introduce a child variable via c3 (2) for position 1
-        vt = vx.children[(2,2,1)] # represents ba
+        assert (2, 2, 1) in vx.children  # In layer 2, we introduce a child variable via c3 (2) for position 1
+        vt = vx.children[(2, 2, 1)]  # represents ba
         assert isinstance(vt, Variable)
         assert vt.features == BitSet.from_subset(dimension=3, subset={2})
         assert vt.level == 1
@@ -397,62 +433,33 @@ class TestBasicExplanation:
 
         # Verify the mapping of variables to constants (the paper's \nu)
         # Recall constant order is a, ab, b, ba
-        assert vx in ba.var_const_idx
-        assert ba.var_const_idx[vx] == 1 # ab
-        assert vy in ba.var_const_idx
-        assert ba.var_const_idx[vy] == 0 # a
-        assert vz in ba.var_const_idx
-        assert ba.var_const_idx[vz] == 1 # ab
-        assert vt in ba.var_const_idx
-        assert ba.var_const_idx[vt] == 3  # ba
+        assert vx in var_const_idx
+        assert var_const_idx[vx] == 1  # ab
+        assert vy in var_const_idx
+        assert var_const_idx[vy] == 0  # a
+        assert vz in var_const_idx
+        assert var_const_idx[vz] == 1  # ab
+        assert vt in var_const_idx
+        assert var_const_idx[vt] == 3  # ba
 
         # Verify the (var,layer) to mask mapping (the paper's \mu)
         # These expected results were done by hand.
-        assert ba.var_layer_mask[(vx,2)] == BitSet.from_subset(3, {1})
-        assert ba.var_layer_mask[(vx,1)] == BitSet.from_subset(6, {})
-        assert ba.var_layer_mask[(vx,0)] == BitSet.from_subset(3, {})
-        assert (vy,2) not in ba.var_layer_mask
-        assert ba.var_layer_mask[(vy, 1)] == BitSet.from_subset(6, {0})
-        assert ba.var_layer_mask[(vy, 0)] == BitSet.from_subset(3, {0})
-        assert (vz,2) not in ba.var_layer_mask
-        assert (vz,1) not in ba.var_layer_mask
-        assert ba.var_layer_mask[(vz, 0)] == BitSet.from_subset(3, {2})
-        assert (vt,2) not in ba.var_layer_mask
-        assert ba.var_layer_mask[(vt, 1)] == BitSet.from_subset(6, {1})
-        assert ba.var_layer_mask[(vt, 0)] == BitSet.from_subset(3, {2})
+        assert var_layer_mask[(vx, 2)] == BitSet.from_subset(3, {1})
+        assert var_layer_mask[(vx, 1)] == BitSet.from_subset(6, {})
+        assert var_layer_mask[(vx, 0)] == BitSet.from_subset(3, {})
+        assert (vy, 2) not in var_layer_mask
+        assert var_layer_mask[(vy, 1)] == BitSet.from_subset(6, {0})
+        assert var_layer_mask[(vy, 0)] == BitSet.from_subset(3, {0})
+        assert (vz, 2) not in var_layer_mask
+        assert (vz, 1) not in var_layer_mask
+        assert var_layer_mask[(vz, 0)] == BitSet.from_subset(3, {2})
+        assert (vt, 2) not in var_layer_mask
+        assert var_layer_mask[(vt, 1)] == BitSet.from_subset(6, {1})
+        assert var_layer_mask[(vt, 0)] == BitSet.from_subset(3, {2})
 
-
-
-class TestFactExplainer:
-
-    @pytest.mark.skip(reason="needs updating")
-    def test_fact_explainer_ex1(self):
-        fe = make_mock_fe_1()
-
-        assert fe.node_to_index == {"a": 0, "b":1, "c":2}
-        assert fe.cd_ent1 == "a"
-        assert fe.cd_ent3 == "A"
-        assert fe.cd_fact_const_index == 0
-        assert fe.node_to_index["a"] == 0
-        assert fe.cd_fact_pred_pos == 0
-        assert isinstance(fe.basic_explanation,BasicExplanation)
-        rule =  fe.rule
-        head, body = rule.rstrip(' .\n').split(' :- ')
-        body_atoms = set(body.split(', '))
-        assert head ==  "<A>[?X0]"
-        assert body_atoms == {"<A>[?X0]", "<S>[?X1,?X0]", "<A>[?X1]", "<R>[?X2,?X0]", "<A>[?X2]"}
-
-    @pytest.mark.skip(reason="needs updating")
     def test_fact_explainer_ex2(self):
         fe = make_mock_fe_2()
-
-        assert fe.node_to_index == {"a": 0, "term-for-a-b":1, "b":2, "term-for-b-a":3}
-        assert fe.cd_ent1 == "term-for-a-b"
-        assert fe.cd_ent3 == "unary-for-R"
-        assert fe.cd_fact_const_index == 1
-        assert fe.cd_fact_pred_pos == 1
-        assert isinstance(fe.basic_explanation,BasicExplanation)
-        rule =  fe.rule
+        rule = fe.explain_fact(get_fact_ex2())
         head, body = rule.rstrip(' .\n').split(' :- ')
         body_atoms = set(body.split(', '))
         assert head ==  "<R>[?X0,?X1]"

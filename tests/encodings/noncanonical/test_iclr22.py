@@ -1,11 +1,11 @@
 import os
 import tempfile
-from unittest.mock import MagicMock
-
+import torch
 import pytest
 
 from src.encodings.canonical import CanonicalEncoderDecoder
 from src.encodings.noncanonical.iclr22 import ICLREncoderDecoder
+from src.model.cd_graph import CDGraph
 from src.rule_extraction.fact_explanation import FactExplainer
 from src.rule_extraction.tree_shaped_conjunction import Variable, TreeShapedConjunction
 from src.utils.utils import TYPE_PRED
@@ -106,12 +106,16 @@ def test_save_to_file(encoder):
 
     os.remove(file_path)
 
-@pytest.mark.skip(reason="needs to mock a complex FactExplainer, not done yet")
-def test_unfold_unary_head(encoder):
+def test_unfold_unary_head():
     external = ICLREncoderDecoder(
         unary_predicates=["A","B"],
         binary_predicates=["R","S"]
     )
+    external.pair_term_dict[("a","b")] = "term-for-a-b"
+    external.pair_term_dict[("b","a")] = "term-for-b-a"
+    external.pair_term_dict[("d","a")] = "term-for-d-a"
+    external.pair_term_dict[("a","c")] = "term-for-a-c" # this one MUST exist if a and c are connected via c4
+
     internal = CanonicalEncoderDecoder(
         unary_predicates=external.canonical_unary_predicates,
         binary_predicates=external.canonical_binary_predicates
@@ -138,16 +142,23 @@ def test_unfold_unary_head(encoder):
     variable_a.children[(0,1,2)] = variable_e # layer 0, colour 2, position 3
     conj = TreeShapedConjunction(variable_a,2)
 
-    fake_explainer = MagicMock(spec=FactExplainer)
-    fake_explanation = MagicMock(spec=BasicExplanation)
-    fake_explainer.ent2 = TYPE_PRED
-    fake_explainer.basic_explanation = fake_explanation
-    fake_explanation.var_const_idx = {variable_a: 0, variable_b: 1, variable_c: 2, variable_d: 3, variable_e: 4}
-    data_conj, root_vars = external.unfold(conj, internal_encoder=internal, explainer=fake_explainer)
+    var_const_idx = {variable_a: 0, variable_b: 1, variable_c: 2, variable_d: 3, variable_e: 4}
+    # More edges and nodes should exist, but we dont include them because they are unnecessary for the test
+    cd_graph = CDGraph(col_size = 1,delta=1,features=torch.ones(6,1),edges=torch.zeros(2,1),
+                       edge_colours=torch.zeros(1,1), node_names = ["a",
+                                                                    "term-for-a-b",
+                                                                    "term-for-b-a",
+                                                                    "c",
+                                                                    "term-for-d-a",
+                                                                    "term-for-a-c"])
+    data_conj, root_vars = external.unfold(conj,
+                                           internal_encoder=internal,
+                                           var_const_idx=var_const_idx,
+                                           cd_graph = cd_graph,
+                                           head_predicate_arity=1)
 
     # Validate root variable
     assert root_vars == ["X0"]
-
     # Expected facts:
     # Unfolding happens in a depth-first way, which tells us the order of the variables
     # a->b->c->d->e
@@ -156,17 +167,19 @@ def test_unfold_unary_head(encoder):
     assert ("X0", "R", "X1") in data_conj
     assert ("X0", "S", "X1") in data_conj # from features in variable b
     assert ("X1", "S", "X0") in data_conj # from features in variable c
-    assert ("X1", "top-pred", "X2")
-    assert ("X2", TYPE_PRED, "B") # from features in variable d
-    assert ("X3", "R", "X0") # from features in variable e
+    assert ("X2", TYPE_PRED, "B") in data_conj # from features in variable d
+    assert ("X3", "R", "X0") in data_conj # from features in variable e
 
 
-@pytest.mark.skip(reason="needs to mock a complex FactExplainer, not done yet")
-def test_unfold_binary_head(encoder):
+def test_unfold_binary_head():
     external = ICLREncoderDecoder(
         unary_predicates=["A", "B"],
         binary_predicates=["R", "S"]
     )
+    external.pair_term_dict[("a", "b")] = "term-for-a-b"
+    external.pair_term_dict[("c", "a")] = "term-for-c-a"
+    external.pair_term_dict[("b", "a")] = "term-for-b-a"
+    external.pair_term_dict[("a", "d")] = "term-for-a-d"  # this one MUST exist if a and d are connected via c4
     internal = CanonicalEncoderDecoder(
         unary_predicates=external.canonical_unary_predicates,
         binary_predicates=external.canonical_binary_predicates
@@ -193,29 +206,58 @@ def test_unfold_binary_head(encoder):
     variable_b.children[(0, 3, 1)] = variable_e  # layer 0, colour 4, position 2
     conj = TreeShapedConjunction(variable_a,2)
 
-    data_conj, root_vars = external.unfold(conj, internal_encoder=internal)
+
+    # Unfolding happens in a depth-first way, which tells us the order of the variables: a->b->c->e->d
+    var_const_idx = {variable_a: 0, variable_b: 1, variable_c: 2, variable_e: 3, variable_d: 4}
+    # More edges, nodes and 1 features should exist, but we dont include them because they are unnecessary for the test
+    cd_graph = CDGraph(col_size=1, delta=4, features=torch.tensor([[0,0,0,0],
+                                                                   [0,0,0,0],
+                                                                   [0,0,0,0],
+                                                                   [0,0,0,0],
+                                                                   [0,0,0,0],
+                                                                   [0,0,1,0]]),
+                       edges=torch.zeros(2,1),
+                       edge_colours=torch.zeros(1, 1),
+                       node_names=["term-for-a-b", "a", "term-for-c-a", "d", "term-for-b-a", "term-for-a-d"])
+
+
+    data_conj, root_vars = external.unfold(conj,
+                                           internal_encoder=internal,
+                                           var_const_idx=var_const_idx,
+                                           cd_graph = cd_graph,
+                                           head_predicate_arity=2)
 
     # Validate root variable
     assert root_vars == ["X0","X1"]
 
     # Expected facts:
-    # Unfolding happens in a depth-first way, which tells us the order of the variables: a->b->c->e->d
     assert ("X0", "R", "X1") in data_conj
     assert ("X0", "S", "X1") in data_conj # from features in variable a
     assert("X0", TYPE_PRED, "A") in data_conj # from features in variable b
     assert ("X2", "S", "X0") in data_conj # from features in variable c
-    assert ("X0", "top-pred", "X3") in data_conj
+    assert ("X0", "R", "X3") in data_conj # this is how we ground the top-pred
     assert ("X3", TYPE_PRED, "B") in data_conj # from features in variable e
     assert ("X1", "R", "X0") in data_conj # from features in variable d
 
-@pytest.mark.skip(reason="needs to mock a complex FactExplainer, not done yet")
-def test_unfold_empty(encoder):
+def test_unfold_empty():
+    external = ICLREncoderDecoder( unary_predicates=["A"], binary_predicates=["R"] )
+    external.pair_term_dict[("a", "b")] = "term-for-a-b"
     internal = CanonicalEncoderDecoder(
-        unary_predicates=["A"],
-        binary_predicates=["R"]
+        unary_predicates=external.canonical_unary_predicates,
+        binary_predicates=external.canonical_binary_predicates
     )
     feature_mask_a = BitSet.from_subset(dimension=2, subset=set())
     variable_a = Variable(feature_mask_a, level=2)
     conj = TreeShapedConjunction(variable_a,1)
-    result = encoder.unfold(conj, internal_encoder=internal)
-    assert result[0] == []
+    var_const_idx = {variable_a: 0}
+    # More edges, nodes and 1 features should exist, but we dont include them because they are unnecessary for the test
+    cd_graph = CDGraph(col_size=1, delta=2, features=torch.tensor([[0, 1]]), edges=torch.zeros(2,1),
+                       edge_colours=torch.zeros(1, 1), node_names=["term-for-a-b"])
+    data_conj, root_vars = external.unfold(conj,
+                            internal_encoder=internal,
+                            var_const_idx=var_const_idx,
+                            cd_graph = cd_graph,
+                            head_predicate_arity=2)
+    assert root_vars == ["X0","X1"]
+    # Expected fact
+    assert ("X0", "R", "X1") in data_conj

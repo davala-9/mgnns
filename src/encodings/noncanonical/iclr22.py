@@ -135,26 +135,25 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
     # This function takes a tree-shaped conjunction expressed in the Canonical Signature and returns a conjunction in
     # the Data Signature.
     # We traverse the canonical conjunction unfolding as we go.
-    # Note that we only unfold canonic unary atoms, (which turn into either unary or binary data atoms)
-    # Canonical binary atoms are used only to choose the correct unfolding function.
+    # Note that we unfold mainly canonic unary atoms, (which turn into either unary or binary data atoms)
+    # Canonical binary atoms are often superfluous, but in some cases require the addition of a TOP predicate fact
     # Returns the unfolded conjunction and a list of the variables in the head (might be one or two)
-    def unfold(self, can_conj: TreeShapedConjunction, internal_encoder: CanonicalEncoderDecoder, **kwargs):
-
-        # Top-predicates are necessary to unfold "edge facts", which are indeed necessary to the rule
-        fe: FactExplainer = kwargs.get("explainer")
-        if fe is None:
-            raise ValueError("ICLR22EncDec requires a FactExplainer to unfold")
-        # Ideally we simply need to pass a map of the variables of can_conj to constants in the cd_graph
+    def unfold(self, can_conj: TreeShapedConjunction,
+               internal_encoder: CanonicalEncoderDecoder, **kwargs):
+        var_const_idx = kwargs.get("var_const_idx")
+        cd_graph = kwargs.get("cd_graph")
+        head_predicate_arity = kwargs.get("head_predicate_arity")
+        head_is_binary = head_predicate_arity == 2
 
         def get_data_constants_for_tree_variable(var: Variable):
-            canonical_constant_index = fe.basic_explanation.var_const_idx[var]
-            canonical_constant = fe.trace.cd_graph.node_names[canonical_constant_index]
+            canonical_constant_index = var_const_idx[var]
+            canonical_constant = cd_graph.node_names[canonical_constant_index]
+            print(canonical_constant)
             if canonical_constant in self.pair_term_dict.inverse:
                 return list(self.pair_term_dict.inverse[canonical_constant])
             else:
                 return list(canonical_constant)
 
-        head_is_binary = fe.ent2 is not TYPE_PRED
         data_conj = [] # Not necessarily tree-shaped
         data_var_to_const = {} # Not strictly necessary but helps debug and simplifies dealing with top predicates
 
@@ -229,6 +228,7 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
                 elif bin_pred == self.col4:
                     # The target must be another unary node.
                     new_data_var = new_variable()
+                    data_var_to_const[new_data_var] = get_data_constants_for_tree_variable(child_var)[0]
                     # A top fact must be added to unfold the edge connecting these two variables are connected.
                     data_conj.append((data_var, self.TOP_PREDICATE, new_data_var))
                     unfold_variable_for_single(child_var,new_data_var)
@@ -236,34 +236,44 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
                     raise ValueError(f"Binary fact in canonical atom uses predicate {bin_pred} which is not valid.")
 
         if head_is_binary:
-            unfold_variable_for_pair(can_conj.root_node, root_variables[0], root_variables[1])
+            unfold_variable_for_pair(can_conj.root_node, first_data_var=root_variables[0], second_data_var=root_variables[1])
         else:
-            unfold_variable_for_single(can_conj.root_node, root_variables[0])
+            unfold_variable_for_single(can_conj.root_node, data_var=root_variables[0])
 
         data_conj = list(dict.fromkeys(data_conj)) # Remove potential duplicates
 
-        # Process TOP predicate
+        # Process TOP predicate facts
         already_grounded_pairs = set() # Note variables that already appear together in a fact of the rule
         for s, p, o in data_conj:
             if p != TYPE_PRED and p != self.TOP_PREDICATE:
-                already_grounded_pairs.add({s, o})
+                already_grounded_pairs.add(frozenset((s, o)))
         # Now we filter out TOP_PREDICATE facts and replace them when necessary
         new_data_conj = data_conj.copy()
         for s, p, o in data_conj:
             if p == self.TOP_PREDICATE:
-                new_data_conj.remove((s,p,o))
-                if {s, o} not in already_grounded_pairs:
-                    if (s,o) not in self.pair_term_dict: # Switch order; either term-for-s-o or the reverse must exist
-                        old_s = s
-                        old_o = o
-                        s = old_o
-                        o = old_s
-                    t = self.term_for_pair((s,o))
-                    can_pred_idx = torch.nonzero(fe.trace.fl0[fe.trace.cd_graph.node_names_to_indices[t]])[0].item()
-                    can_predicate = internal_encoder.unary_pred_position_dict.inverse[can_pred_idx]
-                    new_data_conj.append((s,self.input_predicate_to_unary_canonical_dict.inverse[can_predicate],o))
-                    already_grounded_pairs.add({s,o})
-        return data_conj, root_variables
+                new_data_conj.remove((s,p,o)) # Always remove from final conjunction
+                if frozenset((s,o)) not in already_grounded_pairs:
+                    a = data_var_to_const[s]
+                    b = data_var_to_const[o]
+                    if (a,b) in self.pair_term_dict:
+                        t = self.term_for_pair((a, b))
+                        nz = torch.nonzero(cd_graph.features[cd_graph.node_names_to_indices[t]]).flatten()
+                        if len(nz):
+                            can_pred_idx = nz[0].item()
+                            can_predicate = internal_encoder.unary_pred_position_dict.inverse[can_pred_idx]
+                            new_data_conj.append((s,self.input_predicate_to_unary_canonical_dict.inverse[can_predicate],o))
+                    else:
+                        assert (b,a) in self.pair_term_dict
+                        t = self.term_for_pair((b, a))
+                        nz = torch.nonzero(cd_graph.features[cd_graph.node_names_to_indices[t]]).flatten()
+                        if len(nz):
+                            can_pred_idx = nz[0].item()
+                            can_predicate = internal_encoder.unary_pred_position_dict.inverse[can_pred_idx]
+                            new_data_conj.append(
+                                (o, self.input_predicate_to_unary_canonical_dict.inverse[can_predicate], s))
+                    already_grounded_pairs.add(frozenset((s,o)))
+
+        return new_data_conj, root_variables
 
     # This is a rather specific function. Given two data variables y1 and y2, this returns a single variable if y1 y2
     # correspond to a single canonical variable y, and two variables if they correspond to a canonical variable each.

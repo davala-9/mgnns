@@ -86,7 +86,7 @@ class FactExplainer:
         #         self.cfg.derivation_threshold), "ERROR: Gamma_i is not sound. This should not happen; there's a bug."
         # TODO: also check that the variable levels match the \mu and the trees.
 
-        return conjunction
+        return conjunction, var_const_idx, var_layer_mask
 
     def explain_fact(self, fact: tuple[str,str,str]):
 
@@ -95,7 +95,7 @@ class FactExplainer:
             "Error: the fact to be explained is not derived by the model on this dataset."
 
         print("Computing Gamma_i")
-        rule_body = self.get_basic_explanation(fact_context)
+        rule_body, var_const_idx, var_layer_mask = self.get_basic_explanation(fact_context)
         print("Length Gamma_i: {}".format(len(rule_body)))
 
         # TODO: Refactor all 3 optimisations
@@ -115,11 +115,20 @@ class FactExplainer:
 
         # Optimisation 3 used to go here and was applied to the best of 1 or 2
 
+        # TODO: this should be a call to the external encoder
+        if fact_context.ent2 == TYPE_PRED:
+            head_predicate_arity = 1
+        else:
+            head_predicate_arity = 2
+
         # Unfold into body via external encoder/decoder
         # This converts a TreeShapedConjunction into a simple list of triples, plus a list of head variables
+
         rule_body, head_variables = self.external_encoder.unfold(can_conj=rule_body,
                                                                  internal_encoder=self.internal_encoder,
-                                                                 explainer=self)
+                                                                 var_const_idx=var_const_idx,
+                                                                 cd_graph=self.cd_graph,
+                                                                 head_predicate_arity=head_predicate_arity)
 
         # Write the rule
         body_atoms = []
