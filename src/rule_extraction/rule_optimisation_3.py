@@ -1,46 +1,64 @@
-# # Dictionary mapping each variables in gamma_i to its relevant positions (given by label of layer 0).
-# total_variable_to_positions_dict = {}
-# for (y, j) in contributors_to_influence_dict:
-#     if y not in total_variable_to_positions_dict:
-#         total_variable_to_positions_dict[y] = {j}
-#     else:
-#         total_variable_to_positions_dict[y].add(j)
-#
-# def get_successors(partial_variable_to_positions_dict, conjunction_form):
-#     successors = []
-#     for y in total_variable_to_positions_dict:
-#         if y not in partial_variable_to_positions_dict:
-#             for j in total_variable_to_positions_dict[y]:
-#                 new_successor = partial_variable_to_positions_dict.copy()
-#                 new_successor[y] = {j}
-#                 new_conjunction_form = conjunction_form.union(get_conjunction_for_contributor(y, j))
-#                 successors.append((len(new_conjunction_form), new_successor, new_conjunction_form))
-#         else:
-#             for j in total_variable_to_positions_dict[y]:
-#                 if j not in partial_variable_to_positions_dict[y]:
-#                     new_successor = partial_variable_to_positions_dict.copy()
-#                     new_successor[y].add(j)
-#                     new_conjunction_form = conjunction_form.union(
-#                         get_conjunction_for_contributor(y, j))
-#                     successors.append(
-#                         (len(new_conjunction_form), new_successor, new_conjunction_form))
-#     return successors
+from src.rule_extraction.tree_shaped_conjunction import TreeShapedConjunction, CompactSubTree
+from typing import Protocol
+from collections import deque
+import time
 
-frontier = get_successors({}, set())
-while frontier:
-    # Sort in decreasing order of cost
-    frontier = sorted(frontier, reverse=True)
-    (score, dictionary, conjunction) = frontier.pop()
-    (gr_features, node_to_gr_row_dict, gr_edge_list,
-     gr_colour_list) = can_encoder_decoder.encode_dataset(
-        conjunction)
-    gr_dataset = Data(x=gr_features, edge_index=gr_edge_list, edge_type=gr_colour_list).to(device)
-    gnn_output_gr = model(gr_dataset)
-    if (gnn_output_gr[node_to_gr_row_dict[nodes.const_node_dict[x1]]][cd_pred_pos] >=
-            cfg.derivation_threshold):
-        frontier = None
-        rule_body = conjunction
-    else:
-        frontier = list(set(frontier).union(set(get_successors(dictionary, conjunction))))
+# Try to implement in a way that does not allow duplicates, please
+class Frontier(Protocol):
+    def push(self, item: CompactSubTree) -> None: ...
+    def pop(self) -> CompactSubTree: ...
+    def is_empty(self) -> bool: ...
 
-    rule_body = remove_redundant_atoms(rule_body)
+class DFSFrontier:
+    def __init__(self):
+        self._stack: list[CompactSubTree] = []
+    def push(self, item: CompactSubTree) -> None:
+        self._stack.append(item)
+    def pop(self) -> CompactSubTree:
+        return self._stack.pop()
+    def is_empty(self) -> bool:
+        return len(self._stack) == 0
+
+class BFSFrontier:
+    def __init__(self):
+        self._queue: deque[CompactSubTree] = deque()
+    def push(self, item: CompactSubTree) -> None:
+        self._queue.append(item)
+    def pop(self) -> CompactSubTree:
+        return self._queue.popleft()
+    def is_empty(self) -> bool:
+        return len(self._queue) == 0
+
+class RuleOptimisation3:
+
+    def __init__(self, device, model, threshold, pred_position, base_tree:TreeShapedConjunction):
+        self.device = device
+        self.model = model
+        self.threshold = threshold
+        self.pred_position = pred_position
+        self.base_tree = base_tree
+
+    def graph_search(self, frontier: Frontier, timeout: float | None = None):
+        start = time.monotonic()
+        frontier.push(self.base_tree.initial_subtree)
+        explored = set()
+        while not frontier.is_empty():
+            if timeout is not None and time.monotonic() - start > timeout:
+                return None
+            subtree = frontier.pop()
+            if subtree in explored:
+                continue
+            if subtree.check_soundness(self.device,self.model,self.threshold,self.pred_position):
+                return subtree
+            explored.add(subtree)
+            for successor in subtree.get_successors():
+                frontier.push(successor)
+        return None
+
+    def minimise_rule(self):
+        bfs_frontier = BFSFrontier()
+        result = self.graph_search(BFSFrontier,timeout=600)
+        if result is None:
+            print("BFS rule simplification timed out, trying DFS...")
+            result = self.graph_search(DFSFrontier())
+        return result

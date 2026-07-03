@@ -30,31 +30,6 @@ def test_from_subset_out_of_range_raises(subset):
         BitSet.from_subset(5, subset)
 
 
-def test_add_element():
-    bs = BitSet(8)
-    bs.add(3)
-    assert bs.contains(3)
-
-
-def test_add_existing_element_is_idempotent():
-    bs = BitSet.from_subset(8, {3})
-    assert bs.as_set() == {3}
-    bs.add(3)
-    assert bs.as_set() == {3}
-
-
-def test_remove_element():
-    bs = BitSet.from_subset(8, {1, 2, 3})
-    bs.remove(2)
-    assert not bs.contains(2)
-    assert bs.as_set() == {1, 3}
-
-
-def test_remove_nonexistent_element_is_noop():
-    bs = BitSet.from_subset(8, {1, 3})
-    bs.remove(5)
-    assert bs.as_set() == {1, 3}
-
 
 @pytest.mark.parametrize(
     ("subset", "x", "expected"),

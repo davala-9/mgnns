@@ -32,6 +32,10 @@ class CDGraph:
         self.node_names_to_indices = {n_name: index for index, n_name in enumerate(self.node_names)}
 
 
+    def clone(self):
+        return CDGraph(col_size=self.col_size,delta=self.delta,features=self.features,
+                       edges=self.edges,edge_colours=self.edge_colours,node_names=self.node_names)
+
 @dataclass
 class TraceCollector:
 
