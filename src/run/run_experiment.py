@@ -118,7 +118,7 @@ if __name__ == "__main__":
     explanations_file = ef / "explanations.txt"
     explainer = FactExplainer(device, model, cfg.derivation_threshold, trace, external_encoder, internal_encoder)
     with open(explanations_file, 'w') as output:
-        for fact in list(predictions)[:1]:  # TODO: replace magic number with parameter
+        for fact in list(predictions)[:10]:  # TODO: replace magic number with parameter
             rule = explainer.explain_fact(fact)
             output.write("{}\n".format(fact))
             output.write(rule + '\n')

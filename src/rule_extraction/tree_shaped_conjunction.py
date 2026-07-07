@@ -1,6 +1,6 @@
+from bidict import bidict
 import torch
 from typing import Tuple
-
 from src.model.cd_graph import CDGraph
 from src.model.gnn_transformation import apply_model
 from src.utils.bitset import BitSet
@@ -35,7 +35,7 @@ class TreeShapedConjunction:
 
     @cached_property
     def initial_subtree(self):
-        return CompactSubTree(variable=self.root_node,
+        return CompactSubTree(base_tree=self,
                               nodes=(self.index_tree[1][self.root_node],),  # this is: node_to_id[self.root_node]
                               masks=(self.root_node.features.to_empty_compressed(),))
 
@@ -45,7 +45,7 @@ class TreeShapedConjunction:
         features = torch.zeros((len(id_to_node),self.root_node.features.dimension))
         edges = [[], []]
         edge_colours = []
-        node_names = ["dummy_name"] * len(id_to_node) # The node names do not matter for this.
+        node_names = [f"dummynode_{i}" for i in range(len(id_to_node))] # The node names do not matter for this.
         for node_id, node in enumerate(id_to_node):
             features[node_id] = torch.tensor(node.features.as_vector())
             for (_, col, _), child_var in node.children.items():
@@ -56,9 +56,29 @@ class TreeShapedConjunction:
         return CDGraph(col_size=self.n_colours,
                        delta=self.root_node.features.dimension,
                        features = features,
-                       edges = torch.tensor(edges),
-                       edge_colours = torch.tensor(edge_colours),
+                       edges = torch.tensor(edges, dtype=torch.long),
+                       edge_colours = torch.tensor(edge_colours, dtype=torch.long),
                        node_names = node_names)
+
+    def simplify(self, compact: "CompactSubTree"):
+        # TODO: replace this walk by a new version that CAN change the tree as it walks it, to prune steps.
+        id_to_node, node_to_id, children_ids, parent_ids = self.index_tree
+        for node in self.walk():
+            node_id = node_to_id[node]
+            if node_id not in compact.nodes:
+                continue
+            id_in_tree = compact.nodes.index(node_id)
+            node.features = node.features.from_compressed(compact.masks[id_in_tree])
+            # Update Children
+            to_delete = []
+            for key, child in node.children.items():
+                child_id = node_to_id[child]
+                if child_id not in compact.nodes:
+                    to_delete.append(key)
+            for key in to_delete:
+                del node.children[key]
+        return self
+
 
     def __len__(self):
         return  sum(1 for _ in self.walk())
@@ -68,7 +88,7 @@ class Variable:
     def __init__(self, features: BitSet=None, level: int=0):
         self.features = features
         self.level = level
-        self.children: dict[tuple[int,int,int], Variable] = {}  # Maps triple (l,col,j) to the relevant node.
+        self.children: bidict[tuple[int,int,int], Variable] = bidict()  # Maps triple (l,col,j) to the relevant node.
 
     def get_feature_list(self):
         return self.features.elements()
@@ -107,7 +127,7 @@ class CompactSubTree:
                 j += 1
             new_nodeset = self.nodes[:j] + (new_node,) + self.nodes[j:]
             new_mask = id_to_node[new_node].features.to_empty_compressed() # We work with compressed sub-bitsets
-            new_maskset = self.masks[:j] + new_mask + self.masks[j:]
+            new_maskset = self.masks[:j] + (new_mask,) + self.masks[j:]
             yield CompactSubTree(self.base_tree, new_nodeset, new_maskset)
 
     def check_soundness(self, device, model, threshold, pred_position):
@@ -129,38 +149,3 @@ def walk(node: Variable):
     yield node
     for child in children_snapshot:
         yield from walk(child)
-
-
-
-
-
-# class PartialVariable:
-#     def __init__(self, full_variable: Variable, active_features: BitSet=None,
-#                  active_children : dict[tuple[int,int,int], Variable] = None ):
-#         self.full_variable = full_variable
-#         if active_features is None:
-#             self.active_features = BitSet.from_subset(full_variable.features.dimension,set())
-#         else:
-#             self.active_features = active_features
-#         assert self.active_features.subsetOf(full_variable.features)
-#         if active_children is None:
-#             self.active_children = {}
-#         else:
-#             self.active_children = active_children
-#         for (l, col, j) in self.active_children:
-#             assert (l, col, j) in full_variable.children
-#
-#     def clone(self):
-#
-#         cloned_var = PartialVariable(full_variable=self.full_variable,
-#                                      active_features=self.active_features.clone())
-#         for (l, col, j), child in self.active_children.items():
-#             cloned_var.active_children[(l,col,j)] =
-#
-#
-#
-#     def getSuccessors(self):
-#         for j in self.active_features.new_elements(self.full_variable.features):
-#             new_feature_set = self.active_features.clone().add(j)
-#             yield PartialVariable(full_variable=self.full_variable, active_features=new_feature_set,
-#                                   active_children=self.active_children)

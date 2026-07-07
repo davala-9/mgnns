@@ -1,4 +1,4 @@
-data_dir: /Users/unac116/Documents/GitHub/mgnns/data/link_prediction/WN18RRv1
+data_dir: /Users/unac116/Documents/GitHub/mgnns/data/link_prediction/fb237v1
 exp_dir:  /Users/unac116/Documents/GitHub/mgnns/experiments
 use_dummy_constants: false   # options: true | false
 encoding_scheme: iclr22 # options: iclr22 | canonical

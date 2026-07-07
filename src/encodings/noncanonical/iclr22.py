@@ -148,7 +148,6 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
         def get_data_constants_for_tree_variable(var: Variable):
             canonical_constant_index = var_const_idx[var]
             canonical_constant = cd_graph.node_names[canonical_constant_index]
-            print(canonical_constant)
             if canonical_constant in self.pair_term_dict.inverse:
                 return list(self.pair_term_dict.inverse[canonical_constant])
             else:

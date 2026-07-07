@@ -55,9 +55,9 @@ class RuleOptimisation3:
                 frontier.push(successor)
         return None
 
+    # Returns a minimal compact subtree
     def minimise_rule(self):
-        bfs_frontier = BFSFrontier()
-        result = self.graph_search(BFSFrontier,timeout=600)
+        result = self.graph_search(BFSFrontier(),timeout=600)
         if result is None:
             print("BFS rule simplification timed out, trying DFS...")
             result = self.graph_search(DFSFrontier())

@@ -1,12 +1,13 @@
 import numpy as np
 
 from src.model.cd_graph import TraceCollector
+from src.model.gnn_transformation import apply_gnn_transformation
 from src.encodings.canonical import CanonicalEncoderDecoder
 from src.encodings.noncanonical.noncanonical import NonCanonicalEncoder
 from src.rule_extraction.tree_shaped_conjunction import TreeShapedConjunction, Variable
 from src.utils.utils import TYPE_PRED, backpropagate_relevance
 from src.utils.bitset import BitSet
-
+from src.rule_extraction.rule_optimisation_3 import RuleOptimisation3
 
 # We bundle a bunch of auxiliary info about a fact we want to explain
 class FactContext:
@@ -43,7 +44,7 @@ class FactExplainer:
         initial_mask = BitSet.from_subset(self.internal_encoder.get_n_unary_predicates(),
                                           {fact_context.cd_fact_pred_pos})
         root_variable = Variable(level=L)
-        conjunction = TreeShapedConjunction(root_variable, self.internal_encoder.get_n_binary_predicates)
+        conjunction = TreeShapedConjunction(root_variable, self.internal_encoder.get_n_binary_predicates())
         # Maps a Variable to the (index of the) constant that grounds it. This is the \nu mapping in the paper
         var_const_idx = {root_variable: fact_context.cd_fact_const_index}
         # Maps a (Variable, Layer) to the relevant Feature Mask. This is the paper's \mu.
@@ -113,7 +114,12 @@ class FactExplainer:
         # else:
         #    print("Approximation 1 wins")
 
-        # Optimisation 3 used to go here and was applied to the best of 1 or 2
+        optimiser3 =  RuleOptimisation3(device=self.device,
+                                        model=self.model,
+                                        threshold=self.threshold,
+                                        pred_position=fact_context.cd_fact_pred_pos,
+                                        base_tree=rule_body)
+        rule_body.simplify(optimiser3.minimise_rule())
 
         # TODO: this should be a call to the external encoder
         if fact_context.ent2 == TYPE_PRED:
@@ -130,6 +136,7 @@ class FactExplainer:
                                                                  cd_graph=self.cd_graph,
                                                                  head_predicate_arity=head_predicate_arity)
 
+
         # Write the rule
         body_atoms = []
         rule_body = set(rule_body)  # Remove duplicates
@@ -142,5 +149,20 @@ class FactExplainer:
             head =  "<{}>[?{},?{}]".format(fact_context.ent2,head_variables[0],head_variables[1])
         else:
             head = "<{}>[?{}]".format(fact_context.ent3,head_variables[0])
+
+        # Verify that the rule is sound:
+        if fact_context.ent2 is not TYPE_PRED:
+            target_fact = (head_variables[0], fact_context.ent2,  head_variables[1])
+        else:
+            target_fact = (head_variables[0], TYPE_PRED,fact_context.ent3)
+        predictions_dict = apply_gnn_transformation(dataset=rule_body,
+                                                external_encoder=self.external_encoder,
+                                                internal_encoder=self.internal_encoder,
+                                                model=self.model,
+                                                threshold=self.threshold,
+                                                device=self.device)
+        assert predictions_dict[target_fact] > self.threshold
+
+        # Return rule
         return head + " :- " + ", ".join(body_atoms) + " .\n"
 
