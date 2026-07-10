@@ -92,7 +92,7 @@ def compute_metrics(predictions, positive_examples, negative_examples, metrics_f
             f.write("{}\t{}\t{}\t{}\t{}\n".format(threshold, precision(tp, fp),
                                                   recall(tp, fn), accuracy(tp, fp, tn, fn),
                                                   f1score(tp, fp, fn)))
-            recall_vector.append(recall(tp, fp))
+            recall_vector.append(recall(tp, fn))
             precision_vector.append(precision(tp, fp))
         # Add extremal points for AUC. This ensures a perfect classifier has AUC 1, a random classifier has AUC 0.5,
         # and an `always wrong' classifier has an AUC 0. Without this, a perfect classifier would have a score of 0!

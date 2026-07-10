@@ -8,6 +8,7 @@ from src.rule_extraction.tree_shaped_conjunction import TreeShapedConjunction, V
 from src.utils.utils import TYPE_PRED, backpropagate_relevance
 from src.utils.bitset import BitSet
 from src.rule_extraction.rule_optimisation_3 import RuleOptimisation3
+from src.datalog.apply_rules import apply_rule
 
 # We bundle a bunch of auxiliary info about a fact we want to explain
 class FactContext:
@@ -23,7 +24,7 @@ class FactContext:
 class FactExplainer:
 
     def __init__(self, device, model, threshold, trace: TraceCollector, external_encoder: NonCanonicalEncoder,
-                 internal_encoder: CanonicalEncoderDecoder):
+                 internal_encoder: CanonicalEncoderDecoder, input_dataset=None):
 
         self.device = device
         self.model = model
@@ -33,7 +34,7 @@ class FactExplainer:
         self.activations = [trace.fl0,trace.fl1,trace.fl2] # Index matches layer
         self.cd_graph = trace.cd_graph
         self.node_to_index = {node: i for i, node in enumerate(self.cd_graph.node_names)}  # Helpful dictionary
-
+        self.input_dataset = input_dataset
 
     # This is the Gamma_i in the papers. It computes a most general explanation but prunes exploiting matrix sparsity
     # Takes a Fact as input, but wrapped with some auxiliary values as a FactContext
@@ -149,6 +150,7 @@ class FactExplainer:
             head =  "<{}>[?{},?{}]".format(fact_context.ent2,head_variables[0],head_variables[1])
         else:
             head = "<{}>[?{}]".format(fact_context.ent3,head_variables[0])
+        rule = head + " :- " + ", ".join(body_atoms) + " .\n"
 
         # Verify that the rule is sound:
         if fact_context.ent2 is not TYPE_PRED:
@@ -163,6 +165,11 @@ class FactExplainer:
                                                 device=self.device)
         assert predictions_dict[target_fact] > self.threshold
 
+        # Verify that the rule is sufficient
+        # TODO: The None option should not be allowed, but so far we leave it to not break the tests.
+        if self.input_dataset is not None:
+            assert fact in apply_rule(rule,self.input_dataset)
+
         # Return rule
-        return head + " :- " + ", ".join(body_atoms) + " .\n"
+        return rule
 
