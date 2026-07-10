@@ -121,7 +121,6 @@ class FactExplainer:
                                         pred_position=fact_context.cd_fact_pred_pos,
                                         base_tree=rule_body)
         rule_body.simplify(optimiser3.minimise_rule())
-
         # TODO: this should be a call to the external encoder
         if fact_context.ent2 == TYPE_PRED:
             head_predicate_arity = 1
@@ -136,7 +135,6 @@ class FactExplainer:
                                                                  var_const_idx=var_const_idx,
                                                                  cd_graph=self.cd_graph,
                                                                  head_predicate_arity=head_predicate_arity)
-
 
         # Write the rule
         body_atoms = []

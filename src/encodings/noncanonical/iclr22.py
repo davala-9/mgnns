@@ -254,22 +254,19 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
                 if frozenset((s,o)) not in already_grounded_pairs:
                     a = data_var_to_const[s]
                     b = data_var_to_const[o]
-                    if (a,b) in self.pair_term_dict:
-                        t = self.term_for_pair((a, b))
-                        nz = torch.nonzero(cd_graph.features[cd_graph.node_names_to_indices[t]]).flatten()
-                        if len(nz):
-                            can_pred_idx = nz[0].item()
-                            can_predicate = internal_encoder.unary_pred_position_dict.inverse[can_pred_idx]
-                            new_data_conj.append((s,self.input_predicate_to_unary_canonical_dict.inverse[can_predicate],o))
+                    t = self.term_for_pair((a, b)) # both this and the term for b a must exist
+                    nz = torch.nonzero(cd_graph.features[cd_graph.node_names_to_indices[t]]).flatten()
+                    if len(nz):
+                        can_pred_idx = nz[0].item()
+                        can_predicate = internal_encoder.unary_pred_position_dict.inverse[can_pred_idx]
+                        new_data_conj.append((s,self.input_predicate_to_unary_canonical_dict.inverse[can_predicate],o))
                     else:
-                        assert (b,a) in self.pair_term_dict
                         t = self.term_for_pair((b, a))
                         nz = torch.nonzero(cd_graph.features[cd_graph.node_names_to_indices[t]]).flatten()
-                        if len(nz):
-                            can_pred_idx = nz[0].item()
-                            can_predicate = internal_encoder.unary_pred_position_dict.inverse[can_pred_idx]
-                            new_data_conj.append(
-                                (o, self.input_predicate_to_unary_canonical_dict.inverse[can_predicate], s))
+                        assert len(nz) # if the feature of t-a-b was all 0, then that of t-b-a must have a 1
+                        can_pred_idx = nz[0].item()
+                        can_predicate = internal_encoder.unary_pred_position_dict.inverse[can_pred_idx]
+                        new_data_conj.append((o,self.input_predicate_to_unary_canonical_dict.inverse[can_predicate],s))
                     already_grounded_pairs.add(frozenset((s,o)))
 
         return new_data_conj, root_variables

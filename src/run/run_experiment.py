@@ -116,10 +116,11 @@ if __name__ == "__main__":
     # Explanation
     print("Computing prediction explanations...")
     explanations_file = ef / "explanations.txt"
+    sorted_predictions = sorted(predictions, key=predictions.get, reverse=True)
     explainer = FactExplainer(device, model, cfg.derivation_threshold, trace, external_encoder, internal_encoder,
                               test_graph_dataset)
     with open(explanations_file, 'w') as output:
-        for fact in list(predictions)[:10]:  # TODO: replace magic number with parameter
+        for fact in sorted_predictions[:10]:  # TODO: replace magic number with parameter
             rule = explainer.explain_fact(fact)
             output.write("{}\n".format(fact))
             output.write(rule + '\n')
