@@ -23,7 +23,7 @@ class EC_GCNConv(MessagePassing):
 
     # in_channels (int) - Size of each input sample
     # out_channels (int) - Size of each output sample
-    def __init__(self, dimensions, edge_colours, aggregations):
+    def __init__(self, in_channels, out_channels, edge_colours, aggregation):
 
         self.aggr = aggregation
         aggr_name = getattr(aggregation, "value", aggregation)
