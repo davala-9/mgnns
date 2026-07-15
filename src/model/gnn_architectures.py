@@ -46,10 +46,10 @@ class EC_GCNConv(MessagePassing):
 
 class GNN(torch.nn.Module):
 
-    def __init__(self, feature_dimension, num_edge_colours, aggregation_1, aggregation_2):
+    def __init__(self, dimensions, num_edge_colours, aggregations):
         super(GNN, self).__init__()
 
-        self.num_layers = 2 # Currently hardcoded!
+        self.num_layers = len(dimensions) - 1
 
         self.num_colours = num_edge_colours
         # From layer 0 (left) to layer L (right)
