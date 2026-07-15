@@ -55,8 +55,10 @@ class GNN(torch.nn.Module):
         # From layer 0 (left) to layer L (right)
         self.dimensions = dimensions
 
-        self.agg_1 = aggregation_1
-        self.agg_2 = aggregation_2
+        if len(aggregations) != self.num_layers:
+            raise ValueError(f"Expected {self.num_layers} aggregations, but got {len(aggregations)}.")
+        else:
+            self.aggregations = aggregations
 
         self.conv1 = EC_GCNConv(self.dimensions[0], self.dimensions[1], num_edge_colours, self.agg_1)
         self.conv2 = EC_GCNConv(self.dimensions[1], self.dimensions[2], num_edge_colours, self.agg_2)
