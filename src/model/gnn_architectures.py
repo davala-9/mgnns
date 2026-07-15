@@ -53,7 +53,7 @@ class GNN(torch.nn.Module):
 
         self.num_colours = num_edge_colours
         # From layer 0 (left) to layer L (right)
-        self.dimensions = [feature_dimension, 2*feature_dimension, feature_dimension]
+        self.dimensions = dimensions
 
         self.agg_1 = aggregation_1
         self.agg_2 = aggregation_2
