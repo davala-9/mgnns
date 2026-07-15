@@ -61,21 +61,21 @@ def example_model_1(device):
         [0., 0., 1., 1.]
     ])
     # Matrix A1
-    model.lin_self_1.weight.data = torch.tensor([
+    model.lins[0].weight.data = torch.tensor([
         [1., 0.],
         [0., 0.],
         [0., 0.],
         [0., 0.]
     ])
     # Matrix A2
-    model.lin_self_2.weight.data = torch.tensor([
+    model.lins[1].weight.data = torch.tensor([
         [1., 1., 0., 0.],
         [0., 0., 0., 0.]
     ])
     # Bias b1
-    model.lin_self_1.bias.data = torch.tensor([0.,0.,-1.,1.])
+    model.lins[0].bias.data = torch.tensor([0.,0.,-1.,1.])
     # Bias b2
-    model.lin_self_2.bias.data = torch.tensor([-2.,-1.])
+    model.lins[1].bias.data = torch.tensor([-2.,-1.])
     return model
 
 def example_cdgraph_1():
@@ -229,7 +229,7 @@ def example_model_2(device):
         [0., 0., 0., 0., 0., 0.]
     ])
     # Matrix A1
-    model.lin_self_1.weight.data = torch.tensor([
+    model.lins[0].weight.data = torch.tensor([
         [1., 0., 0.],
         [0., 0., 1.],
         [0., 0., 0.],
@@ -238,15 +238,15 @@ def example_model_2(device):
         [0., 0., 0.]
     ])
     # Matrix A2
-    model.lin_self_2.weight.data = torch.tensor([
+    model.lins[1].weight.data = torch.tensor([
         [0., 0., 0., 0., 0., 0.],
         [0., 0., 0., 0., 0., 0.],
         [0., 0., 0., 0., 0., 0.]
     ])
     # Bias b1
-    model.lin_self_1.bias.data = torch.tensor([-1,0.,0.,0.,0.,0.])
+    model.lins[0].bias.data = torch.tensor([-1,0.,0.,0.,0.,0.])
     # Bias b2
-    model.lin_self_2.bias.data = torch.tensor([0.,-1.,0.])
+    model.lins[1].bias.data = torch.tensor([0.,-1.,0.])
     return model
 
 def example_cdgraph_2():
