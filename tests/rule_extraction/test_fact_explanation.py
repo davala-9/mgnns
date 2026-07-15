@@ -37,26 +37,26 @@ def example_model_1(device):
     assert model.num_colours == 2
     assert model.dimensions == [2,4,2]
     # Matrix B1-c1
-    model.conv1.weights.data[0] = torch.tensor([
+    model.convs[0].weights.data[0] = torch.tensor([
     [0., 0.],
     [1., 0.],
     [0., 1.],
     [0., 0.]
     ])
     # Matrix B1-c2
-    model.conv1.weights.data[1] = torch.tensor([
+    model.convs[0].weights.data[1] = torch.tensor([
         [0., 0.],
         [0., 0.],
         [0., 1.],
         [0., 0.]
     ])
     # Matrix B2-c1
-    model.conv2.weights.data[0] = torch.tensor([
+    model.convs[1].weights.data[0] = torch.tensor([
         [0., 0., 0., 0.],
         [0., 0., 0., 0.]
     ])
     # Matrix B2-c2
-    model.conv2.weights.data[1] = torch.tensor([
+    model.convs[1].weights.data[1] = torch.tensor([
         [1., 0., 0., 0.],
         [0., 0., 1., 1.]
     ])
@@ -169,7 +169,7 @@ def example_model_2(device):
     assert model.num_colours == 4
     assert model.dimensions == [3,6,3]
     # Matrix B1-c1
-    model.conv1.weights.data[0] = torch.tensor([
+    model.convs[0].weights.data[0] = torch.tensor([
     [0., 0., 1.],
     [0., 0., 0.],
     [0., 0., 0.],
@@ -178,7 +178,7 @@ def example_model_2(device):
     [0., 0., 0.]
     ])
     # Matrix B1-c2
-    model.conv1.weights.data[1] = torch.tensor([
+    model.convs[0].weights.data[1] = torch.tensor([
     [0., 0., 0.],
     [0., 0., 0.],
     [0., 0., 0.],
@@ -187,7 +187,7 @@ def example_model_2(device):
     [0., 0., 0.]
     ])
     # Matrix B1-c3
-    model.conv1.weights.data[2] = torch.tensor([
+    model.convs[0].weights.data[2] = torch.tensor([
         [0., 0., 0.],
         [0., 0., 0.],
         [0., 0., 0.],
@@ -196,7 +196,7 @@ def example_model_2(device):
         [0., 0., 0.]
     ])
     # Matrix B1-c4
-    model.conv1.weights.data[3] = torch.tensor([
+    model.convs[0].weights.data[3] = torch.tensor([
         [0., 0., 0.],
         [0., 0., 0.],
         [0., 0., 0.],
@@ -205,25 +205,25 @@ def example_model_2(device):
         [0., 0., 0.]
     ])
     # Matrix B2-c1
-    model.conv2.weights.data[0] = torch.tensor([
+    model.convs[1].weights.data[0] = torch.tensor([
         [0., 0., 0., 0., 0., 0.],
         [1., 0., 0., 0., 0., 0.],
         [0., 0., 0., 0., 0., 0.]
     ])
     # Matrix B2-c2
-    model.conv2.weights.data[1] = torch.tensor([
+    model.convs[1].weights.data[1] = torch.tensor([
         [0., 0., 0., 0., 0., 0.],
         [0., 0., 0., 0., 0., 0.],
         [0., 0., 0., 0., 0., 0.]
     ])
     # Matrix B2-c3
-    model.conv2.weights.data[2] = torch.tensor([
+    model.convs[1].weights.data[2] = torch.tensor([
         [0., 0., 0., 0., 0., 0.],
         [0., 1., 0., 0., 0., 0.],
         [0., 0., 0., 0., 0., 0.]
     ])
     # Matrix B2-c4
-    model.conv2.weights.data[3] = torch.tensor([
+    model.convs[1].weights.data[3] = torch.tensor([
         [0., 0., 0., 0., 0., 0.],
         [0., 0., 0., 0., 0., 0.],
         [0., 0., 0., 0., 0., 0.]
