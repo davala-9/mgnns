@@ -60,11 +60,9 @@ class GNN(torch.nn.Module):
         else:
             self.aggregations = aggregations
 
-        self.conv1 = EC_GCNConv(self.dimensions[0], self.dimensions[1], num_edge_colours, self.agg_1)
-        self.conv2 = EC_GCNConv(self.dimensions[1], self.dimensions[2], num_edge_colours, self.agg_2)
+        self.convs = torch.nn.ModuleList()
+        self.lins = torch.nn.ModuleList()
 
-        self.lin_self_1 = torch.nn.Linear(self.dimensions[0], self.dimensions[1])
-        self.lin_self_2 = torch.nn.Linear(self.dimensions[1], self.dimensions[2])
         
         self.output = torch.nn.Sigmoid()
 
