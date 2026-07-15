@@ -99,43 +99,40 @@ class GNN(torch.nn.Module):
         return self.dimensions[layer]
 
     def matrix_A(self, layer):
-        if layer == 1:
-            return self.lin_self_1.weight.detach()
-        elif layer == 2:
-            return self.lin_self_2.weight.detach()
-        else:
-            return None
+        # Adjusted for 0-indexing internally while keeping 1-indexing externally
+        idx = layer - 1
+        if 0 <= idx < self.num_layers:
+            return self.lins[idx].weight.detach()
+        return None
 
     def matrix_B(self, layer, colour):
-        if layer == 1:
-            return self.conv1.weights[colour].detach()
-        elif layer == 2:
-            return self.conv2.weights[colour].detach()
-        else:
-            return None
+        idx = layer - 1
+        if 0 <= idx < self.num_layers:
+            # Note: This assumes the custom convolution has a 'weights' attribute
+            if hasattr(self.convs[idx], 'weights'):
+                return self.convs[idx].weights[colour].detach()
+        return None
 
     def bias(self, layer):
-        if layer == 1:
-            return self.lin_self_1.bias.detach()
-        elif layer == 2:
-            return self.lin_self_2.bias.detach() - 10
-        else:
-            return None
+        idx = layer - 1
+        if 0 <= idx < self.num_layers:
+            bias_val = self.lins[idx].bias.detach()
+            if idx == self.num_layers - 1:
+                return bias_val - 10
+            return bias_val
+        return None
 
     def activation(self, layer):
-        if layer == 1:
+        idx = layer - 1
+        if 0 <= idx < self.num_layers - 1:
             return torch.relu
-        elif layer == 2:
-            m = torch.nn.Sigmoid()
-            return m
-        else:
-            return None
+        elif idx == self.num_layers - 1:
+            return torch.nn.Sigmoid()
+        return None
 
     def aggregation_function(self, layer):
-        if layer == 1:
-            return self.agg_1
-        elif layer == 2:
-            return self.agg_2
-        else:
-            return None
+        idx = layer - 1
+        if 0 <= idx < self.num_layers:
+            return self.aggregations[idx]
+        return None
 #
