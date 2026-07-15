@@ -28,7 +28,10 @@ from src.utils.bitset import BitSet
 # Feature 1: current node has features 1 & 2 and S-neighbour with feature 1
 # Feature 2: has an S-neighbour with feature 3 & S-neighbour with feature 4
 def example_model_1(device):
-    model = GNN(feature_dimension=2, num_edge_colours=2,aggregation_1="max",aggregation_2="max").to(device)
+    model = GNN(
+        dimensions=[2,4,2],
+        num_edge_colours=2,
+        aggregations=["max","max"]).to(device)
     # Checks
     assert model.num_layers == 2
     assert model.num_colours == 2
@@ -157,7 +160,10 @@ def get_fact_ex1():
 # Feature 2: current node is c3-connected to one with feature 2 and is c1-connected to a node with feature 1
 # Feature 3: nothing
 def example_model_2(device):
-    model = GNN(feature_dimension=3, num_edge_colours=4,aggregation_1="max",aggregation_2="max").to(device)
+    model = GNN(
+        dimensions=[3,6,3],
+        num_edge_colours=4,
+        aggregations=["max","max"]).to(device)
     # Checks
     assert model.num_layers == 2
     assert model.num_colours == 4
