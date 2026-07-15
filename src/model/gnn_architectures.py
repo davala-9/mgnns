@@ -81,20 +81,19 @@ class GNN(torch.nn.Module):
     def forward(self, data):
         x, edge_index, edge_colour = data.x, data.edge_index, data.edge_type
 
-        # Layer 1
-        x = self.lin_self_1(x) + self.conv1(x, edge_index, edge_colour)
-        x = torch.relu(x)
-        features_1 = x.detach().clone() # Detached so that it does not participate in the computation graph
+        intermediate_features = []
 
-        # Layer 2
-        x = self.lin_self_2(x) + self.conv2(x, edge_index, edge_colour)
-        # Note: this translation is irrelevant since the bias vectors are not
-        # constrained to the positive reals, therefore it isn't mentioned in
-        # the report. However, I've left it here for completeness since the
-        # models were trained with it.
-        x = self.output(x - 10)
+        for i in range(self.num_layers):
+            x = self.lins[i](x) + self.convs[i](x, edge_index, edge_colour)
 
-        return x, features_1
+            # Apply ReLU and save detached features for all but the final layer
+            if i < self.num_layers - 1:
+                x = torch.relu(x)
+                intermediate_features.append(x.detach().clone())
+            else:
+                x = self.output(x - 10)
+
+        return x, intermediate_features
 
     def layer_dimension(self, layer):
         return self.dimensions[layer]
