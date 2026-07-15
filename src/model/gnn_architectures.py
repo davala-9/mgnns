@@ -46,7 +46,7 @@ class EC_GCNConv(MessagePassing):
 
 class GNN(torch.nn.Module):
 
-    def __init__(self, dimensions, num_edge_colours, aggregations):
+    def __init__(self, dimensions, num_edge_colours, aggregations, conv_builder=EC_GCNConv):
         super(GNN, self).__init__()
 
         self.num_layers = len(dimensions) - 1
@@ -63,6 +63,13 @@ class GNN(torch.nn.Module):
         self.convs = torch.nn.ModuleList()
         self.lins = torch.nn.ModuleList()
 
+        for i in range(self.num_layers):
+            in_dim = self.dimensions[i]
+            out_dim = self.dimensions[i + 1]
+            agg = self.aggregations[i]
+
+            self.convs.append(conv_builder(in_dim, out_dim, num_edge_colours, agg))
+            self.lins.append(torch.nn.Linear(in_dim, out_dim))
         
         self.output = torch.nn.Sigmoid()
 
