@@ -1,9 +1,10 @@
 import numpy as np
+import torch
 
-from src.model.cd_graph import TraceCollector
-from src.model.gnn_transformation import apply_gnn_transformation
+from src.model.cd_graph import TraceCollector, CDGraph
+from src.model.gnn_transformation import apply_gnn_transformation, apply_model, apply_c_decoder, apply_nc_decoder
 from src.encodings.canonical import CanonicalEncoderDecoder
-from src.encodings.noncanonical.noncanonical import NonCanonicalEncoder
+from src.encodings.noncanonical.noncanonical import NonCanonicalEncoder, GroundContext
 from src.rule_extraction.tree_shaped_conjunction import TreeShapedConjunction, Variable
 from src.utils.utils import TYPE_PRED, backpropagate_relevance
 from src.utils.bitset import BitSet
@@ -25,7 +26,6 @@ class FactExplainer:
 
     def __init__(self, device, model, threshold, trace: TraceCollector, external_encoder: NonCanonicalEncoder,
                  internal_encoder: CanonicalEncoderDecoder, input_dataset=None):
-
         self.device = device
         self.model = model
         self.threshold = threshold
@@ -123,18 +123,17 @@ class FactExplainer:
         rule_body.simplify(optimiser3.minimise_rule())
         # TODO: this should be a call to the external encoder
         if fact_context.ent2 == TYPE_PRED:
-            head_predicate_arity = 1
+            head_predicate = fact_context.ent3
         else:
-            head_predicate_arity = 2
+            head_predicate = fact_context.ent2
 
         # Unfold into body via external encoder/decoder
         # This converts a TreeShapedConjunction into a simple list of triples, plus a list of head variables
-
-        rule_body, head_variables = self.external_encoder.unfold(can_conj=rule_body,
-                                                                 internal_encoder=self.internal_encoder,
-                                                                 var_const_idx=var_const_idx,
-                                                                 cd_graph=self.cd_graph,
-                                                                 head_predicate_arity=head_predicate_arity)
+        rule_body, head = self.external_encoder.unfold_match_ground(
+            can_conj=rule_body,
+            internal_encoder=self.internal_encoder,
+            head_predicate=head_predicate,
+            grounding_context=GroundContext(fact, self.cd_graph, var_const_idx))
 
         # Write the rule
         body_atoms = []
@@ -144,24 +143,31 @@ class FactExplainer:
                 body_atoms.append("<{}>[?{}]".format(o, s))
             else:
                 body_atoms.append("<{}>[?{},?{}]".format(p, s, o))
-        if fact_context.ent2 is not TYPE_PRED:
-            head =  "<{}>[?{},?{}]".format(fact_context.ent2,head_variables[0],head_variables[1])
+        if head[1] is not TYPE_PRED:
+            written_head =  "<{}>[?{},?{}]".format(head[1], head[0], head[2])
         else:
-            head = "<{}>[?{}]".format(fact_context.ent3,head_variables[0])
-        rule = head + " :- " + ", ".join(body_atoms) + " .\n"
+            written_head = "<{}>[?{}]".format(head[2], head[0])
+        rule = written_head + " :- " + ", ".join(body_atoms) + " .\n"
 
         # Verify that the rule is sound:
-        if fact_context.ent2 is not TYPE_PRED:
-            target_fact = (head_variables[0], fact_context.ent2,  head_variables[1])
+        if not rule_body: # Soundness check algorithm for rules with empty body TODO: generalise this like in the paper
+            cd_graph = CDGraph(self.internal_encoder.get_n_binary_predicates(),
+                               self.internal_encoder.get_n_unary_predicates(),
+                               features=torch.zeros((1,self.internal_encoder.get_n_unary_predicates()),dtype=torch.float),
+                               edges=torch.empty((2,0), dtype=torch.long),
+                               edge_colours=torch.tensor([], dtype=torch.long),
+                               node_names=["X0"])
+            output_cd_graph = apply_model(cd_graph, self.device, self.model)
+            cd_dataset_facts_scores_dict = apply_c_decoder(output_cd_graph, self.threshold, self.internal_encoder)
+            predictions_dict = apply_nc_decoder(cd_dataset_facts_scores_dict, self.external_encoder)
         else:
-            target_fact = (head_variables[0], TYPE_PRED,fact_context.ent3)
-        predictions_dict = apply_gnn_transformation(dataset=rule_body,
+            predictions_dict = apply_gnn_transformation(dataset=rule_body,
                                                 external_encoder=self.external_encoder,
                                                 internal_encoder=self.internal_encoder,
                                                 model=self.model,
                                                 threshold=self.threshold,
                                                 device=self.device)
-        assert predictions_dict[target_fact] > self.threshold
+        assert predictions_dict[head] > self.threshold
 
         # Verify that the rule is sufficient
         # TODO: The None option should not be allowed, but so far we leave it to not break the tests.

@@ -1,12 +1,19 @@
 import os
 import tempfile
 
+import torch
+
 from src.encodings.canonical import CanonicalEncoderDecoder
 from src.encodings.noncanonical.identity import IdentityEncoderDecoder
+from src.encodings.noncanonical.noncanonical import GroundContext
+from src.model.cd_graph import CDGraph
 from src.rule_extraction.tree_shaped_conjunction import Variable, TreeShapedConjunction
 from src.utils.utils import TYPE_PRED
 from src.utils.bitset import BitSet
 
+DUMMY_GRAPH = CDGraph(col_size=1, delta=1, features=torch.tensor([[0]]), edges=torch.zeros(2,1),
+                       edge_colours=torch.zeros(1, 1), node_names=["dummy"])
+EMPTY_DICT = {}
 
 # ------------------------
 # Basic functionality tests
@@ -101,10 +108,15 @@ def test_unfold_simple_tree():
     variable_c.children[(0,0,1)] = variable_d
     conj = TreeShapedConjunction(variable_a,2)
 
-    data_conj, root_vars = external.unfold(conj, head_is_binary=False, internal_encoder=internal)
 
-    # Validate root variable
-    assert root_vars == ["X0"]
+    ground_data = GroundContext(["a",TYPE_PRED,"A"], DUMMY_GRAPH, EMPTY_DICT) # dummy data
+    data_conj, head = external.unfold_match_ground(can_conj=conj,
+                                                        internal_encoder=internal,
+                                                        head_predicate="A",
+                                                        grounding_context=ground_data)
+
+    # Validate head
+    assert head == ("X0", TYPE_PRED, "A")
 
     # Expected facts:
     # Unfolding happens in a depth-first way, which tells us the order of the variables
@@ -127,6 +139,11 @@ def test_unfold_empty():
     feature_mask_a = BitSet.from_subset(dimension=1,subset=set())
     variable_a = Variable(feature_mask_a,2)
     conj = TreeShapedConjunction(variable_a,1)
-    rule, head_vars = encoder.unfold(conj, internal_encoder=internal)
+
+    ground_data = GroundContext(["a","R","b"], DUMMY_GRAPH, EMPTY_DICT) # dummy data
+    rule, head = encoder.unfold_match_ground(can_conj=conj,
+                                              internal_encoder=internal,
+                                              head_predicate="R",
+                                              grounding_context=ground_data)
 
     assert rule == []

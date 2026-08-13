@@ -140,7 +140,7 @@ class TestMinimiseRule:
         assert result == target
         assert called_frontiers == ["BFSFrontier"]
 
-    def test_falls_back_to_dfs_when_bfs_times_out(self, optimiser_factory, capsys):
+    def test_falls_back_to_spf_when_bfs_times_out(self, optimiser_factory, capsys):
         target = FakeSubtree("target", sound=True)
         root = FakeSubtree("root", successors=[target], sound=False)
         opt = optimiser_factory(FakeBaseTree(root))
@@ -154,7 +154,7 @@ class TestMinimiseRule:
         opt.graph_search = fake_graph_search
         result = opt.minimise_rule()
         assert result == target
-        assert [name for name, _ in calls] == ["BFSFrontier", "DFSFrontier"]
+        assert [name for name, _ in calls] == ["BFSFrontier", "SinglePathFrontier"]
         assert "timed out" in capsys.readouterr().out.lower()
 
     def test_returns_none_when_both_frontiers_fail(self, optimiser_factory):

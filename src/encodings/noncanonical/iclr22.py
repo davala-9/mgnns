@@ -3,12 +3,19 @@ from sympy.physics.units import second
 from sympy.strategies import canon
 
 from src.encodings.canonical import CanonicalEncoderDecoder
-from src.encodings.noncanonical.noncanonical import NonCanonicalEncoder
+from src.encodings.noncanonical.noncanonical import NonCanonicalEncoder, GroundContext
 from bidict import bidict
 
 from src.rule_extraction.fact_explanation import FactExplainer
 from src.rule_extraction.tree_shaped_conjunction import TreeShapedConjunction, Variable
 from src.utils.utils import TYPE_PRED
+
+# Auxiliary class for unfolding rules
+class GroundData:
+    def __init__(self, ground_context: GroundContext, encoder: "ICLREncoderDecoder"):
+        self.ground_context = ground_context
+        self.encoder = encoder
+
 
 class ICLREncoderDecoder(NonCanonicalEncoder):
 
@@ -26,10 +33,16 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
         self.input_predicate_to_unary_canonical_dict = bidict()
         self.input_predicate_to_arity = {}
         if load_from_document is not None:
+            self.unary_predicates = []
+            self.binary_predicates = []
             for line in open(load_from_document, 'r').readlines():
                 input_predicate, canonical_predicate, arity = line.split()
                 self.input_predicate_to_unary_canonical_dict[input_predicate] = canonical_predicate
                 self.input_predicate_to_arity[input_predicate] = int(arity)
+                if int(arity)==1:
+                    self.unary_predicates.append(input_predicate)
+                else:
+                    self.binary_predicates.append(input_predicate)
         else:
             assert set(unary_predicates).isdisjoint(set(binary_predicates)) # Sanity check
             for pred in unary_predicates:
@@ -38,9 +51,14 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
             for pred in binary_predicates:
                 self.input_predicate_to_unary_canonical_dict[pred] = "unary-for-{}".format(pred)
                 self.input_predicate_to_arity[pred] = 2
+            self.unary_predicates = unary_predicates
+            self.binary_predicates = binary_predicates
         # Maps pairs of constants to a new single term
         self.pair_term_dict = bidict()
         self.canonical_unary_predicates = list(self.input_predicate_to_unary_canonical_dict.inverse.keys())
+
+        # Store these just in case
+
 
     # Save format (predicate \t new_predicate \t arity)
     def save_to_file(self, target_file):
@@ -106,6 +124,13 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
             ab = self.term_for_pair((s, o))
             return ab, TYPE_PRED, self.input_predicate_to_unary_canonical_dict[p]
 
+    def unary_can_predicate_to_data_predicate(self, predicate:str):
+        return self.input_predicate_to_unary_canonical_dict.inverse[predicate]
+
+    def unary_can_predicate_to_data_predicate_arity(self, predicate: str):
+        return self.input_predicate_to_arity[
+            self.input_predicate_to_unary_canonical_dict.inverse[predicate]]
+
     def decode_dataset(self, canonical_dataset):
         return {decoded for s, p, o in canonical_dataset
                 if (decoded := self.decode_fact(s, p, o)) is not None}
@@ -132,45 +157,188 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
     def original_arity(self, canonical_predicate):
         return self.input_predicate_to_arity[self.input_predicate_to_unary_canonical_dict.inverse[canonical_predicate]]
 
-    # This function takes a tree-shaped conjunction expressed in the Canonical Signature and returns a conjunction in
-    # the Data Signature.
-    # We traverse the canonical conjunction unfolding as we go.
-    # Note that we unfold mainly canonic unary atoms, (which turn into either unary or binary data atoms)
-    # Canonical binary atoms are often superfluous, but in some cases require the addition of a TOP predicate fact
-    # Returns the unfolded conjunction and a list of the variables in the head (might be one or two)
-    def unfold(self, can_conj: TreeShapedConjunction,
-               internal_encoder: CanonicalEncoderDecoder, **kwargs):
-        var_const_idx = kwargs.get("var_const_idx")
-        cd_graph = kwargs.get("cd_graph")
-        head_predicate_arity = kwargs.get("head_predicate_arity")
+    # We traverse the canonical conjunction, unfolding as we go.
+    # We use a slight optimisation: we KNOW whether the head variable represents a constant pair or a single
+    # constant in the input data, based on the arity of the head predicate. Because of this, we can propagate this
+    # information to know, for each CANONICAL variable, whether it represents also a constant pair or a single
+    # constant in the input data. This halves the size of the output program.
+    # We unfold mainly canonic unary atoms, which turn into either unary or binary data atoms.
+    # Canonical binary atoms must sometimes be unfolded too.
+    def unfold_all(self,can_conj: TreeShapedConjunction,internal_encoder: CanonicalEncoderDecoder,head_predicate: str):
+        # This has multiple uses in the unfolding
+        head_predicate_arity = self.input_predicate_to_arity[head_predicate]
         head_is_binary = head_predicate_arity == 2
 
-        def get_data_constants_for_tree_variable(var: Variable):
-            canonical_constant_index = var_const_idx[var]
-            canonical_constant = cd_graph.node_names[canonical_constant_index]
+        # Variable manager
+        data_var_prefix = "X"  # Variables in the unfolded conjunction are of the form Xn, for n a number
+        data_var_counter = 0
+        def new_variable():  # Aux method to create new variables
+            nonlocal data_var_counter
+            data_var_counter += 1
+            return data_var_prefix + str(data_var_counter)
+
+        # Define root variables
+        root_variables = [data_var_prefix + str(data_var_counter)]  # X0 is always a root variable
+        if head_is_binary:
+            second_root_data_var = new_variable()
+            root_variables.append(second_root_data_var)
+
+        # Aux method, takes two variables and returns all possible binary atoms that use them both
+        def all_binary_atoms(data_var_1, data_var_2):
+            all_atoms = set([])
+            equal_vars = data_var_1 == data_var_2
+            for binary_predicate in self.binary_predicates:
+                all_atoms.add((data_var_1, binary_predicate, data_var_2))
+                if not equal_vars:
+                    all_atoms.add((data_var_2, binary_predicate, data_var_1))
+            return all_atoms
+
+        # Unfold variable that we know represents a pair of data_constants.
+        def unfold_variable_for_pair(data_conj, can_var: Variable,
+                                     first_data_var: str = None, second_data_var: str = None):
+            # Create any missing variables
+            assert first_data_var is not None or second_data_var is not None  # We should know at least one of them.
+            if first_data_var is None:
+                first_data_var = new_variable()
+            if second_data_var is None:
+                second_data_var = new_variable()
+
+            # Extend conjunction with all relevant unary atoms. Can branch into multiple options.
+            new_data_conjs = []
+            if can_var.get_feature_list():
+                for feat in can_var.get_feature_list():
+                    can_predicate = internal_encoder.unary_pred_position_dict.inverse[feat]
+                    data_predicate = self.input_predicate_to_unary_canonical_dict.inverse[can_predicate]
+                    data_conj.append((first_data_var, data_predicate, second_data_var))
+                new_data_conjs.append(data_conj)
+            else:  # If there's no RELEVANT binary predicate, we must add all binary predicates as per the encoding
+                for atom in all_binary_atoms(first_data_var,second_data_var):
+                    new_data_conjs.append(data_conj + [atom])
+
+            # Extend all possible conjunctions in the previous step recursively, by unfolding the children of can_var
+            # We unfold directly the nodes, not the edges, because the presence of this node in the canonical encoding
+            # (which is ensured by the lines above), already implies the presence of all these edges via colours 1,2,3
+            # For each colour, we consider all possible ways to expand the current conjunctions
+            for (_, col, _), child_var in can_var.children.items():
+                bin_pred = internal_encoder.binary_pred_colour_dict.inverse[col]
+                next_new_data_conjs = []
+                for new_data_conj in new_data_conjs:
+                    if bin_pred == self.col1:
+                        # This is a binary node, and the edge is c1, so target must be unary node matching first var
+                        next_new_data_conjs.extend(
+                            unfold_variable_for_single(new_data_conj, child_var, first_data_var))
+                    elif bin_pred == self.col2: # Analogous to above
+                        next_new_data_conjs.extend(
+                                unfold_variable_for_single(new_data_conj, child_var, second_data_var))
+                    elif bin_pred == self.col3: # Still a pair, but order must be reversed
+                        unfold_variable_for_pair(new_data_conj, child_var, second_data_var, first_data_var)
+                    else:
+                        continue # if using self.col4, this rule will never match a dataset and should be discarded
+                new_data_conjs = next_new_data_conjs
+
+            return new_data_conjs
+
+        # Unfold variable that we know represents a single constant
+        def unfold_variable_for_single(data_conj, can_var, data_var: str):
+            # First, extend conjunction with the relevant unary atoms.
+            for feat in can_var.get_feature_list():
+                can_predicate = internal_encoder.unary_pred_position_dict.inverse[feat]
+                data_predicate = self.input_predicate_to_unary_canonical_dict.inverse[can_predicate]
+                data_conj.append((data_var, TYPE_PRED, data_predicate))
+
+            # Next, unfold children
+            # Here, for children via c1 and c2, we don't need to worry about unfolding the edge because such edge will
+            # always be created by the encoder due to the existence of each such children, which is a pair
+            # However, for children via c4, since the child is unary, we simply add all binary predicates as per encoder
+            new_data_conjs = [data_conj]
+            for (_, col, _), child_var in can_var.children.items():
+                bin_pred = internal_encoder.binary_pred_colour_dict.inverse[col]
+                next_new_data_conjs = []
+                for new_data_conj in new_data_conjs:
+                    if bin_pred == self.col1:
+                        # This is a unary node, and the edge is c1, so target must be a binary node matching first var
+                        next_new_data_conjs.extend(
+                            unfold_variable_for_pair(new_data_conj, child_var, first_data_var=data_var))
+                    elif bin_pred == self.col2: # Analogous to above
+                        next_new_data_conjs.extend(
+                            unfold_variable_for_pair(new_data_conj, child_var, second_data_var=data_var))
+                    elif bin_pred == self.col4: # The target must be another unary node.
+                        new_data_var = new_variable()
+                        auxiliary_data_conj_set = set()  # We first branch wrt all possible binary predicates
+                        for atom in all_binary_atoms(data_var,new_data_var):
+                            auxiliary_data_conj_set.add(new_data_conj + [atom])
+                        for aux_data_conj in auxiliary_data_conj_set: # Then for each bin pred, we keep unfolding
+                            next_new_data_conjs.extend(
+                                unfold_variable_for_single(aux_data_conj,child_var, new_data_var))
+                    else:
+                        continue # if this rule uses self.col3 it will never match a dataset and should be discarded
+                new_data_conjs = next_new_data_conjs
+            return new_data_conjs
+
+        # Unfolding start
+        if head_is_binary:
+            data_conjs = unfold_variable_for_pair(data_conj=[], can_var=can_conj.root_node,
+                                                     first_data_var=root_variables[0],
+                                                     second_data_var=root_variables[1])
+        else:
+            data_conjs = unfold_variable_for_single(data_conj=[], can_var=can_conj.root_node,
+                                                       data_var=root_variables[0])
+        for data_conj in data_conjs:
+            data_conj = list(dict.fromkeys(data_conj))  # Remove potential duplicates
+
+        if head_is_binary:
+            head = (root_variables[0], head_predicate, root_variables[1])
+        else:
+            head = (root_variables[0], TYPE_PRED, head_predicate)
+
+        return data_conjs, head
+
+
+    # We traverse the canonical conjunction, unfolding as we go.
+    # We unfold mainly canonic unary atoms, which turn into either unary or binary data atoms.
+    # Canonical binary atoms are often superfluous, but in some cases require the addition of a TOP predicate fact
+    # Note that head_predicate is the *data* predicate
+    def unfold_match_ground(self, can_conj: TreeShapedConjunction, internal_encoder: CanonicalEncoderDecoder,
+                            head_predicate: str, grounding_context: GroundContext):
+
+        data_conj = [] # The output conjunction. List, not a TreeLikeConj, because unfolding might break the tree struct
+
+        # This has multiple uses in the unfolding
+        head_predicate_arity = self.input_predicate_to_arity[head_predicate]
+        head_is_binary = head_predicate_arity == 2
+
+        # Map from canonical variables to the indices of the graph nodes they represent
+        can_var_to_can_const_idx = grounding_context.canonical_variable_to_constant_index
+        # Map from data variables to the data constants they are grounded to
+        data_var_to_data_const = {}
+
+        # A canonical variable is grounded into a canonical constant, which in turn matches one or two data variables.
+        def can_variable_to_can_constant(var: Variable):
+            return grounding_context.graph.node_names[can_var_to_can_const_idx[var]]
+
+        # Returns the one or two data variables as a list.
+        def get_data_constants_for_can_variable(var: Variable):
+            canonical_constant = can_variable_to_can_constant(var)
             if canonical_constant in self.pair_term_dict.inverse:
                 return list(self.pair_term_dict.inverse[canonical_constant])
             else:
                 return list(canonical_constant)
 
-        data_conj = [] # Not necessarily tree-shaped
-        data_var_to_const = {} # Not strictly necessary but helps debug and simplifies dealing with top predicates
-
-        # Data variable list
-        data_var_prefix = "X"
+        # Variable manager
+        data_var_prefix = "X" # Variables in the unfolded conjunction are of the form Xn, for n a number
         data_var_counter = 0
-
-        def new_variable():
+        def new_variable(): # Aux method to create new variables
             nonlocal data_var_counter
             data_var_counter += 1
             return data_var_prefix + str(data_var_counter)
+        root_variables = [data_var_prefix + str(data_var_counter)] # X0 is always a root variable
 
-        root_variables = [data_var_prefix + str(data_var_counter)]
-        data_var_to_const[root_variables[0]] = get_data_constants_for_tree_variable(can_conj.root_node)[0]
+        data_var_to_data_const[root_variables[0]] = get_data_constants_for_can_variable(can_conj.root_node)[0]
+
         if head_is_binary:
             second_root_data_var = new_variable()
             root_variables.append(second_root_data_var)
-            data_var_to_const[root_variables[1]] = get_data_constants_for_tree_variable(can_conj.root_node)[1]
+            data_var_to_data_const[root_variables[1]] = get_data_constants_for_can_variable(can_conj.root_node)[1]
 
         # Unfold unary canonical atom that unifies with a canonical constant for a pair of data_constants.
         def unfold_variable_for_pair(can_var: Variable, first_data_var: str=None, second_data_var: str=None):
@@ -178,10 +346,10 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
             assert first_data_var is not None or second_data_var is not None # We should know at least one of them.
             if first_data_var is None:
                 first_data_var = new_variable()
-                data_var_to_const[first_data_var] = get_data_constants_for_tree_variable(can_var)[0]
+                data_var_to_data_const[first_data_var] = get_data_constants_for_can_variable(can_var)[0]
             if second_data_var is None:
                 second_data_var = new_variable()
-                data_var_to_const[second_data_var] = get_data_constants_for_tree_variable(can_var)[1]
+                data_var_to_data_const[second_data_var] = get_data_constants_for_can_variable(can_var)[1]
             for feat in can_var.get_feature_list():
                 can_predicate = internal_encoder.unary_pred_position_dict.inverse[feat]
                 data_predicate = self.input_predicate_to_unary_canonical_dict.inverse[can_predicate]
@@ -227,7 +395,7 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
                 elif bin_pred == self.col4:
                     # The target must be another unary node.
                     new_data_var = new_variable()
-                    data_var_to_const[new_data_var] = get_data_constants_for_tree_variable(child_var)[0]
+                    data_var_to_data_const[new_data_var] = get_data_constants_for_can_variable(child_var)[0]
                     # A top fact must be added to unfold the edge connecting these two variables are connected.
                     data_conj.append((data_var, self.TOP_PREDICATE, new_data_var))
                     unfold_variable_for_single(child_var,new_data_var)
@@ -252,44 +420,28 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
             if p == self.TOP_PREDICATE:
                 new_data_conj.remove((s,p,o)) # Always remove from final conjunction
                 if frozenset((s,o)) not in already_grounded_pairs:
-                    a = data_var_to_const[s]
-                    b = data_var_to_const[o]
+                    a = data_var_to_data_const[s]
+                    b = data_var_to_data_const[o]
                     t = self.term_for_pair((a, b)) # both this and the term for b a must exist
-                    nz = torch.nonzero(cd_graph.features[cd_graph.node_names_to_indices[t]]).flatten()
+                    nz = torch.nonzero(
+                        grounding_context.graph.features[grounding_context.graph.node_names_to_indices[t]]).flatten()
                     if len(nz):
                         can_pred_idx = nz[0].item()
                         can_predicate = internal_encoder.unary_pred_position_dict.inverse[can_pred_idx]
                         new_data_conj.append((s,self.input_predicate_to_unary_canonical_dict.inverse[can_predicate],o))
                     else:
                         t = self.term_for_pair((b, a))
-                        nz = torch.nonzero(cd_graph.features[cd_graph.node_names_to_indices[t]]).flatten()
+                        nz = torch.nonzero(
+                            grounding_context.graph.features[grounding_context.graph.node_names_to_indices[t]]).flatten()
                         assert len(nz) # if the feature of t-a-b was all 0, then that of t-b-a must have a 1
                         can_pred_idx = nz[0].item()
                         can_predicate = internal_encoder.unary_pred_position_dict.inverse[can_pred_idx]
                         new_data_conj.append((o,self.input_predicate_to_unary_canonical_dict.inverse[can_predicate],s))
                     already_grounded_pairs.add(frozenset((s,o)))
 
-        return new_data_conj, root_variables
-
-    # This is a rather specific function. Given two data variables y1 and y2, this returns a single variable if y1 y2
-    # correspond to a single canonical variable y, and two variables if they correspond to a canonical variable each.
-    def find_canonical_variable(self, can_variables_to_data_variables, y1, y2):
-        binary = None
-        unary_y1 = None
-        unary_y2 = None
-        for cvar in can_variables_to_data_variables:
-            if len(can_variables_to_data_variables[cvar]) == 2 and (
-                    (can_variables_to_data_variables[cvar][0] == y1 and can_variables_to_data_variables[cvar][1] == y2) or
-                    (can_variables_to_data_variables[cvar][0] == y2 and can_variables_to_data_variables[cvar][1] == y1)):
-                binary = cvar
-            elif len(can_variables_to_data_variables[cvar]) == 1:
-                if can_variables_to_data_variables[cvar][0] == y1:
-                    unary_y1 = cvar
-                elif can_variables_to_data_variables[cvar][0] == y2:
-                    unary_y2 = cvar
-        if binary:
-            return [binary]
-        elif unary_y1 and unary_y2:
-            return [unary_y1, unary_y2]
+        if head_is_binary:
+            head = (root_variables[0], head_predicate, root_variables[1])
         else:
-            raise Exception("Error: data variables {} and {} do not seem to match any canonical variable. Bug.".format(y1,y2))
+            head = (root_variables[0], TYPE_PRED, head_predicate)
+
+        return new_data_conj, head

@@ -66,3 +66,5 @@ def apply_gnn_transformation(dataset: set[tuple[str, str, str]], external_encode
     dataset_facts_scores_dict =  apply_nc_decoder(cd_dataset_facts_scores_dict,external_encoder) # Step 5
 
     return dataset_facts_scores_dict
+
+

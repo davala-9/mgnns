@@ -9,6 +9,19 @@ class Frontier(Protocol):
     def pop(self) -> CompactSubTree: ...
     def is_empty(self) -> bool: ...
 
+class SinglePathFrontier:
+    def __init__(self):
+        self._item: CompactSubTree | None = None
+    def push(self, item: CompactSubTree) -> None:
+        self._item = item
+    def pop(self) -> CompactSubTree:
+        item = self._item
+        self._item = None
+        assert item is not None
+        return item
+    def is_empty(self) -> bool:
+        return self._item is None
+
 class DFSFrontier:
     def __init__(self):
         self._stack: list[CompactSubTree] = []
@@ -57,8 +70,8 @@ class RuleOptimisation3:
 
     # Returns a minimal compact subtree
     def minimise_rule(self):
-        result = self.graph_search(BFSFrontier(),timeout=600)
+        result = self.graph_search(BFSFrontier(),timeout=120)
         if result is None:
-            print("BFS rule simplification timed out, trying DFS...")
-            result = self.graph_search(DFSFrontier())
+            print("BFS rule simplification timed out, trying SinglePathFrontier...")
+            result = self.graph_search(SinglePathFrontier())
         return result

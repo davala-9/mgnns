@@ -76,6 +76,7 @@ class BitSet:
         k = bin(self.mask).count("1")
         return BitSet(dimension=k)
 
+    # Returns another bitset applying a compressed mask
     def from_compressed(self, other):
         expected_dim = bin(self.mask).count("1")
         if other.dimension != expected_dim:
@@ -95,12 +96,19 @@ class BitSet:
     def successors(self):
         full_mask = (1 << self.dimension) - 1
         diff = full_mask ^ self.mask  # bits that are 0 in self
-
         while diff:
             lsb = diff & -diff
             yield BitSet(self.dimension, self.mask | lsb)
             diff ^= lsb
 
+    # Yield all instances obtained from the current one by switching exactly one 1 to a 0.
+    def predecessors(self):
+        diff = self.mask  # bits that are 1 in self
+        while diff:
+            lsb = diff & -diff
+            yield BitSet(self.dimension, self.mask & ~lsb)
+            diff ^= lsb
+
 
     def __repr__(self):
-        return f"BitSet({self.elements()})"
+        return f"BitSet({self.dimension},{self.elements()})"

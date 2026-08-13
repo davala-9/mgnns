@@ -76,7 +76,11 @@ def parse_rule(rule):
         rule = rule[:-1]
     head_text, body_text = rule.split(":-", 1)
     head = parse_atom(head_text)
-    body = [parse_atom(a) for a in split_atoms(body_text)]
+    body_text = body_text.strip()
+    if body_text:
+        body = [parse_atom(a) for a in split_atoms(body_text)]
+    else:
+        body = []
     return head, body
 
 # Tries to ground a term (i.e. variable or constant) with a given binding, which we assume covers this term

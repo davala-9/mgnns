@@ -6,6 +6,7 @@ from src.model.gnn_transformation import apply_model
 from src.utils.bitset import BitSet
 from functools import cached_property
 
+
 class TreeShapedConjunction:
     def __init__(self, root_node, n_colours):
         self.n_colours = n_colours
@@ -14,6 +15,7 @@ class TreeShapedConjunction:
     def walk(self):
         return walk(self.root_node)
 
+    # This provides an id for each node of the tree-shaped conjunction, and some structural information.
     @cached_property
     def index_tree(self):
         id_to_node = []
@@ -33,13 +35,16 @@ class TreeShapedConjunction:
         dfs(self.root_node)
         return id_to_node, node_to_id, children_ids, parent_ids
 
+
+
     @cached_property
     def initial_subtree(self):
         return CompactSubTree(base_tree=self,
-                              nodes=(self.index_tree[1][self.root_node],),  # this is: node_to_id[self.root_node]
+                              nodes=(self.index_tree[1][self.root_node],),  # index_tree[1] is node_to_id
                               masks=(self.root_node.features.to_empty_compressed(),))
 
     @cached_property
+    # Pass this as a cd graph where nodes are ordered according to id and labelled "dummynode-id"
     def as_cd_graph(self):
         id_to_node, node_to_id, children_ids, parent_ids = self.index_tree
         features = torch.zeros((len(id_to_node),self.root_node.features.dimension))
@@ -60,6 +65,28 @@ class TreeShapedConjunction:
                        edge_colours = torch.tensor(edge_colours, dtype=torch.long),
                        node_names = node_names)
 
+    # Returns another TreeShapedConjunction simplified as given by a compact tree.
+    def extract_from_compact(self, compact: "CompactSubTree"):
+        # TODO: replace this walk by a new version that CAN change the tree as it walks it, to prune steps.
+        id_to_node, node_to_id, children_ids, parent_ids = self.index_tree
+        compact_nodes = set(compact.nodes)
+        node_id_to_compact_index = { # Maps id in self to the index in the compact form
+            node_id: i
+            for i, node_id in enumerate(compact.nodes)
+        }
+        def extract_from_node(node: Variable):
+            node_id = node_to_id[node]
+            new_node = Variable(level=node.level) # No Children or features to start with
+            i = node_id_to_compact_index[node_id]
+            new_node.features = node.features.from_compressed(compact.masks[i])
+            for key, child in node.children.items():
+                child_id = node_to_id[child]
+                if child_id in compact_nodes:
+                    new_node.children[key] = extract_from_node(child)
+            return new_node
+        return TreeShapedConjunction(root_node=extract_from_node(self.root_node), n_colours=self.n_colours)
+
+    # This works essentially like the above, but it mutates the TreeShapedConjunction
     def simplify(self, compact: "CompactSubTree"):
         # TODO: replace this walk by a new version that CAN change the tree as it walks it, to prune steps.
         id_to_node, node_to_id, children_ids, parent_ids = self.index_tree
@@ -79,7 +106,6 @@ class TreeShapedConjunction:
                 del node.children[key]
         return self
 
-
     def __len__(self):
         return  sum(1 for _ in self.walk())
 
@@ -97,6 +123,8 @@ class Variable:
 # This class represents a subtree of the variable. It does so by storing:
 # -- a tuple of nodes of the tree (as indexed by the index_tree method of variable)
 # -- a matching tuple of masks (bitsets that are compressed versions of sub-bitsets of each variables' feature)
+# The idea is that if the original node has n (out of m) relevant positions, the compact subtree simply stores a
+# bitset of the n (not the original m) relevant positions.
 class CompactSubTree:
 
     def __init__(self, base_tree: TreeShapedConjunction, nodes: Tuple[int,...] = (), masks: Tuple[BitSet,...] = ()):
@@ -118,7 +146,7 @@ class CompactSubTree:
         id_to_node, _, children_ids, _ = self.base_tree.index_tree
         added_children.update(child for node in self.nodes for child in children_ids[node])
         added_children.difference_update(self.nodes) # Remove those that are already present in the subtree
-        added_children = sorted(added_children)
+        added_children = sorted(added_children) # Sorted in ascending order
         # Efficient generation of the new CompactSubTrees in one pass through both tuples
         j = 0
         n = len(self.nodes)
@@ -130,10 +158,29 @@ class CompactSubTree:
             new_maskset = self.masks[:j] + (new_mask,) + self.masks[j:]
             yield CompactSubTree(self.base_tree, new_nodeset, new_maskset)
 
+    def get_predecessors(self):
+        # First, get predecessors obtained by flipping a 1 to a 0
+        for index in range(len(self.masks)):
+            for new_mask in self.masks[index].predecessors():
+                yield CompactSubTree( self.base_tree, self.nodes,
+                                      self.masks[:index] + (new_mask,) + self.masks[index + 1:])
+        # Next, predecessors obtained by removing an empty child
+        _, _, children_ids, _ = self.base_tree.index_tree
+        node_set = set(self.nodes)
+        for index, (node, mask) in enumerate(zip(self.nodes, self.masks)):
+            # Only remove nodes with an empty mask
+            if not mask.is_empty():
+                continue
+            # Check there's no child of 'node' in the current subtree, before removing it; i.e. we only remove leaves
+            if any(child in node_set for child in children_ids[node]):
+                continue
+            yield CompactSubTree(self.base_tree, self.nodes[:index] + self.nodes[index + 1:],
+                                  self.masks[:index] + self.masks[index + 1:])
+
     def check_soundness(self, device, model, threshold, pred_position):
         input_graph = self.base_tree.as_cd_graph.clone()
-        id_to_node, node_to_id, children_ids, parent_ids = self.base_tree.index_tree
         input_graph.features =  torch.zeros_like(input_graph.features) # Return all features to zero, like GER
+        id_to_node, node_to_id, children_ids, parent_ids = self.base_tree.index_tree
         for j, node_id in enumerate(self.nodes):
             input_graph.features[node_id] = (
                 torch.tensor(id_to_node[node_id].features.from_compressed(self.masks[j]).as_vector()))

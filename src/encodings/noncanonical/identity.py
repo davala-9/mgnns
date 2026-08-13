@@ -1,5 +1,5 @@
 from src.encodings.canonical import CanonicalEncoderDecoder
-from src.encodings.noncanonical.noncanonical import NonCanonicalEncoder
+from src.encodings.noncanonical.noncanonical import NonCanonicalEncoder, GroundContext
 from src.rule_extraction.tree_shaped_conjunction import TreeShapedConjunction, Variable
 from src.utils.utils import TYPE_PRED
 
@@ -42,14 +42,20 @@ class IdentityEncoderDecoder(NonCanonicalEncoder):
         s, p, o = fact
         return s, p, o
 
-    def unfold(self, can_conj: TreeShapedConjunction, internal_encoder: CanonicalEncoderDecoder,**kwargs):
+    def unary_can_predicate_to_data_predicate(self, predicate:str):
+        return predicate
+
+    def unary_can_predicate_to_data_predicate_arity(self, predicate:str):
+        return 1
+
+    def unfold_all(self, can_conj:TreeShapedConjunction, internal_encoder:CanonicalEncoderDecoder, head_predicate: str):
 
         data_conj = []  # Not necessarily tree-shaped
 
         # Data variable list
         data_var_prefix = "X"
         data_var_counter = 0
-        root_variables = [data_var_prefix + str(data_var_counter)]
+        root_variable = data_var_prefix + str(data_var_counter)
 
         def new_variable():
             nonlocal data_var_counter
@@ -66,6 +72,18 @@ class IdentityEncoderDecoder(NonCanonicalEncoder):
                 data_conj.append((new_data_var, bin_predicate, data_var))
                 unfold_variable(child_var, new_data_var)
 
-        unfold_variable(can_conj.root_node, root_variables[0])
+        unfold_variable(can_conj.root_node, root_variable)
+        head = (root_variable, TYPE_PRED, head_predicate)
 
-        return data_conj, root_variables
+        return [data_conj], head
+
+    def unfold_match_ground(self, can_conj: TreeShapedConjunction, internal_encoder: CanonicalEncoderDecoder,
+               head_predicate: str, grounding_context: GroundContext):
+
+        # The unfolding is unique so grounding_context can be safely ignored
+        data_conj_set, head = self.unfold_all(can_conj, internal_encoder, head_predicate)
+        (data_conj,) = data_conj_set
+        return data_conj, head
+
+
+

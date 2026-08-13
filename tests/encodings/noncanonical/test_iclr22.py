@@ -5,6 +5,7 @@ import pytest
 
 from src.encodings.canonical import CanonicalEncoderDecoder
 from src.encodings.noncanonical.iclr22 import ICLREncoderDecoder
+from src.encodings.noncanonical.noncanonical import GroundContext
 from src.model.cd_graph import CDGraph
 from src.rule_extraction.fact_explanation import FactExplainer
 from src.rule_extraction.tree_shaped_conjunction import Variable, TreeShapedConjunction
@@ -151,14 +152,14 @@ def test_unfold_unary_head():
                                                                     "c",
                                                                     "term-for-d-a",
                                                                     "term-for-a-c"])
-    data_conj, root_vars = external.unfold(conj,
-                                           internal_encoder=internal,
-                                           var_const_idx=var_const_idx,
-                                           cd_graph = cd_graph,
-                                           head_predicate_arity=1)
+    ground_data = GroundContext(["a",TYPE_PRED,"A"],cd_graph,var_const_idx)
+    data_conj, head = external.unfold_match_ground(can_conj=conj,
+                                                   internal_encoder=internal,
+                                                   head_predicate="A",
+                                                   grounding_context=ground_data)
 
     # Validate root variable
-    assert root_vars == ["X0"]
+    assert head == ("X0", TYPE_PRED, "A")
     # Expected facts:
     # Unfolding happens in a depth-first way, which tells us the order of the variables
     # a->b->c->d->e
@@ -220,15 +221,14 @@ def test_unfold_binary_head():
                        edge_colours=torch.zeros(1, 1),
                        node_names=["term-for-a-b", "a", "term-for-c-a", "d", "term-for-b-a", "term-for-a-d"])
 
+    ground_data = GroundContext(["a","R", "b"], cd_graph, var_const_idx)
+    data_conj, head = external.unfold_match_ground(can_conj=conj,
+                                                   internal_encoder=internal,
+                                                   head_predicate="R",
+                                                   grounding_context=ground_data)
 
-    data_conj, root_vars = external.unfold(conj,
-                                           internal_encoder=internal,
-                                           var_const_idx=var_const_idx,
-                                           cd_graph = cd_graph,
-                                           head_predicate_arity=2)
-
-    # Validate root variable
-    assert root_vars == ["X0","X1"]
+    # Validate head
+    assert head == ("X0", "R", "X1")
 
     # Expected facts:
     assert ("X0", "R", "X1") in data_conj
@@ -253,11 +253,12 @@ def test_unfold_empty():
     # More edges, nodes and 1 features should exist, but we dont include them because they are unnecessary for the test
     cd_graph = CDGraph(col_size=1, delta=2, features=torch.tensor([[0, 1]]), edges=torch.zeros(2,1),
                        edge_colours=torch.zeros(1, 1), node_names=["term-for-a-b"])
-    data_conj, root_vars = external.unfold(conj,
-                            internal_encoder=internal,
-                            var_const_idx=var_const_idx,
-                            cd_graph = cd_graph,
-                            head_predicate_arity=2)
-    assert root_vars == ["X0","X1"]
+
+    ground_data = GroundContext(["a", "R", "b"], cd_graph, var_const_idx)
+    data_conj, head = external.unfold_match_ground(can_conj=conj,
+                                                   internal_encoder=internal,
+                                                   head_predicate="R",
+                                                   grounding_context=ground_data)
+    assert head == ("X0", "R", "X1")
     # Expected fact
     assert ("X0", "R", "X1") in data_conj

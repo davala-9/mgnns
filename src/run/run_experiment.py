@@ -1,6 +1,8 @@
 import torch
 from torch_geometric.data import Data, DataLoader
 import argparse
+
+from src.rule_extraction.full_program import EquivalentProgramExtractor
 from src.utils.data_parser import parse
 from src.encodings.canonical import CanonicalEncoderDecoder
 from src.encodings.noncanonical.identity import IdentityEncoderDecoder
@@ -23,7 +25,7 @@ parser.add_argument("config_file", help='Path of the configuration file that con
 # Optional arguments
 parser.add_argument("--load-model", help='Use existing model')
 parser.add_argument( "--minimal", action="store_true", help="Minimise explanatory rules" )
-
+parser.add_argument( "--skip-program", action="store_true", help="Skip equivalent program extraction" )
 
 if __name__ == "__main__":
 
@@ -113,6 +115,15 @@ if __name__ == "__main__":
             output2.write("{}\t{}\t{}\t{}\n".format(s, p, o, score))
     output.close()
 
+    # Full-program extraction
+    if not args.skip_program:
+        print("Computing full equivalent program...")
+        program_file = ef /  "program.txt"
+        program_extractor = EquivalentProgramExtractor(device,model,cfg.derivation_threshold,external_encoder,
+                                                       internal_encoder)
+        program_extractor.compute_all_upper_bounds()
+        program_extractor.get_all_rules(program_file,30)
+
     # Explanation
     print("Computing prediction explanations...")
     explanations_file = ef / "explanations.txt"
@@ -120,7 +131,7 @@ if __name__ == "__main__":
     explainer = FactExplainer(device, model, cfg.derivation_threshold, trace, external_encoder, internal_encoder,
                               test_graph_dataset)
     with open(explanations_file, 'w') as output:
-        for fact in sorted_predictions[:10]:  # TODO: replace magic number with parameter
+        for fact in sorted_predictions[:20]:  # TODO: replace magic number with parameter
             rule = explainer.explain_fact(fact)
             output.write("{}\n".format(fact))
             output.write(rule + '\n')

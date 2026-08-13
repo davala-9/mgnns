@@ -78,7 +78,7 @@ def test_as_set():
 
 def test_repr():
     bs = BitSet.from_subset(8, {1, 3})
-    assert repr(bs) == "BitSet([1, 3])"
+    assert repr(bs) == "BitSet(8,[1, 3])"
 
 
 def test_set_operations_return_new_instances():
