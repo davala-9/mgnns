@@ -21,21 +21,27 @@ def apply_c_encoder(cd_dataset: set[tuple[str,str,str]], internal_encoder):
     return internal_encoder.encode_dataset(cd_dataset)
 
 # Apply Model
-def apply_model(cd_graph:CDGraph, device, model, trace_collector=None):
+def apply_model(cd_graph: CDGraph, device, model, trace_collector=None):
     # PyTorch Encoding: cd_graph -> pytorch geometric graph
     data = Data(x=cd_graph.features, edge_index=cd_graph.edges, edge_type=cd_graph.edge_colours).to(device)
 
     # Apply model
     model.eval()
-    features_layer_2, features_layer_1 = model(data)  # note: features_layer_1 comes already detached
+
+    # Capture the final output tensor and the list of intermediate layer tensors
+    final_features, hidden_features = model(data)
+
     if trace_collector is not None:
         trace_collector.cd_graph = cd_graph
-        trace_collector.fl2 = features_layer_2.detach().clone()
-        trace_collector.fl1 = features_layer_1.clone()
-        trace_collector.fl0 = data.x.detach().clone()
+        trace_collector.input_features = data.x.detach().clone()
+
+        # Safely clone each tensor in the hidden features list
+        trace_collector.hidden_features = [layer.detach().clone() for layer in hidden_features]
+
+        trace_collector.final_features = final_features.detach().clone()
 
     # PyTorch Decoding: pytorch geometric graph -> cd_graph
-    return CDGraph(cd_graph.col_size, cd_graph.delta, features_layer_2.detach().clone(), cd_graph.edges,
+    return CDGraph(cd_graph.col_size, cd_graph.delta, final_features.detach().clone(), cd_graph.edges,
                    cd_graph.edge_colours, cd_graph.node_names)
 
 # Canonical Decoding

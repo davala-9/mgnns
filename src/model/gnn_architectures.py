@@ -46,23 +46,30 @@ class EC_GCNConv(MessagePassing):
 
 class GNN(torch.nn.Module):
 
-    def __init__(self, feature_dimension, num_edge_colours, aggregation_1, aggregation_2):
+    def __init__(self, dimensions, num_edge_colours, aggregations, conv_builder=EC_GCNConv):
         super(GNN, self).__init__()
 
-        self.num_layers = 2 # Currently hardcoded!
+        self.num_layers = len(dimensions) - 1
 
         self.num_colours = num_edge_colours
         # From layer 0 (left) to layer L (right)
-        self.dimensions = [feature_dimension, 2*feature_dimension, feature_dimension]
+        self.dimensions = dimensions
 
-        self.agg_1 = aggregation_1
-        self.agg_2 = aggregation_2
+        if len(aggregations) != self.num_layers:
+            raise ValueError(f"Expected {self.num_layers} aggregations, but got {len(aggregations)}.")
+        else:
+            self.aggregations = aggregations
 
-        self.conv1 = EC_GCNConv(self.dimensions[0], self.dimensions[1], num_edge_colours, self.agg_1)
-        self.conv2 = EC_GCNConv(self.dimensions[1], self.dimensions[2], num_edge_colours, self.agg_2)
+        self.convs = torch.nn.ModuleList()
+        self.lins = torch.nn.ModuleList()
 
-        self.lin_self_1 = torch.nn.Linear(self.dimensions[0], self.dimensions[1])
-        self.lin_self_2 = torch.nn.Linear(self.dimensions[1], self.dimensions[2])
+        for i in range(self.num_layers):
+            in_dim = self.dimensions[i]
+            out_dim = self.dimensions[i + 1]
+            agg = self.aggregations[i]
+
+            self.convs.append(conv_builder(in_dim, out_dim, num_edge_colours, agg))
+            self.lins.append(torch.nn.Linear(in_dim, out_dim))
         
         self.output = torch.nn.Sigmoid()
 
@@ -74,62 +81,58 @@ class GNN(torch.nn.Module):
     def forward(self, data):
         x, edge_index, edge_colour = data.x, data.edge_index, data.edge_type
 
-        # Layer 1
-        x = self.lin_self_1(x) + self.conv1(x, edge_index, edge_colour)
-        x = torch.relu(x)
-        features_1 = x.detach().clone() # Detached so that it does not participate in the computation graph
+        intermediate_features = []
 
-        # Layer 2
-        x = self.lin_self_2(x) + self.conv2(x, edge_index, edge_colour)
-        # Note: this translation is irrelevant since the bias vectors are not
-        # constrained to the positive reals, therefore it isn't mentioned in
-        # the report. However, I've left it here for completeness since the
-        # models were trained with it.
-        x = self.output(x - 10)
+        for i in range(self.num_layers):
+            x = self.lins[i](x) + self.convs[i](x, edge_index, edge_colour)
 
-        return x, features_1
+            # Apply ReLU and save detached features for all but the final layer
+            if i < self.num_layers - 1:
+                x = torch.relu(x)
+                intermediate_features.append(x.detach().clone())
+            else:
+                x = self.output(x - 10)
+
+        return x, intermediate_features
 
     def layer_dimension(self, layer):
         return self.dimensions[layer]
 
     def matrix_A(self, layer):
-        if layer == 1:
-            return self.lin_self_1.weight.detach()
-        elif layer == 2:
-            return self.lin_self_2.weight.detach()
-        else:
-            return None
+        # Adjusted for 0-indexing internally while keeping 1-indexing externally
+        idx = layer - 1
+        if 0 <= idx < self.num_layers:
+            return self.lins[idx].weight.detach()
+        return None
 
     def matrix_B(self, layer, colour):
-        if layer == 1:
-            return self.conv1.weights[colour].detach()
-        elif layer == 2:
-            return self.conv2.weights[colour].detach()
-        else:
-            return None
+        idx = layer - 1
+        if 0 <= idx < self.num_layers:
+            # Note: This assumes the custom convolution has a 'weights' attribute
+            if hasattr(self.convs[idx], 'weights'):
+                return self.convs[idx].weights[colour].detach()
+        return None
 
     def bias(self, layer):
-        if layer == 1:
-            return self.lin_self_1.bias.detach()
-        elif layer == 2:
-            return self.lin_self_2.bias.detach() - 10
-        else:
-            return None
+        idx = layer - 1
+        if 0 <= idx < self.num_layers:
+            bias_val = self.lins[idx].bias.detach()
+            if idx == self.num_layers - 1:
+                return bias_val - 10
+            return bias_val
+        return None
 
     def activation(self, layer):
-        if layer == 1:
+        idx = layer - 1
+        if 0 <= idx < self.num_layers - 1:
             return torch.relu
-        elif layer == 2:
-            m = torch.nn.Sigmoid()
-            return m
-        else:
-            return None
+        elif idx == self.num_layers - 1:
+            return torch.nn.Sigmoid()
+        return None
 
     def aggregation_function(self, layer):
-        if layer == 1:
-            return self.agg_1
-        elif layer == 2:
-            return self.agg_2
-        else:
-            return None
+        idx = layer - 1
+        if 0 <= idx < self.num_layers:
+            return self.aggregations[idx]
+        return None
 #

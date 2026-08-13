@@ -28,51 +28,54 @@ from src.utils.bitset import BitSet
 # Feature 1: current node has features 1 & 2 and S-neighbour with feature 1
 # Feature 2: has an S-neighbour with feature 3 & S-neighbour with feature 4
 def example_model_1(device):
-    model = GNN(feature_dimension=2, num_edge_colours=2,aggregation_1="max",aggregation_2="max").to(device)
+    model = GNN(
+        dimensions=[2,4,2],
+        num_edge_colours=2,
+        aggregations=["max","max"]).to(device)
     # Checks
     assert model.num_layers == 2
     assert model.num_colours == 2
     assert model.dimensions == [2,4,2]
     # Matrix B1-c1
-    model.conv1.weights.data[0] = torch.tensor([
+    model.convs[0].weights.data[0] = torch.tensor([
     [0., 0.],
     [1., 0.],
     [0., 1.],
     [0., 0.]
     ])
     # Matrix B1-c2
-    model.conv1.weights.data[1] = torch.tensor([
+    model.convs[0].weights.data[1] = torch.tensor([
         [0., 0.],
         [0., 0.],
         [0., 1.],
         [0., 0.]
     ])
     # Matrix B2-c1
-    model.conv2.weights.data[0] = torch.tensor([
+    model.convs[1].weights.data[0] = torch.tensor([
         [0., 0., 0., 0.],
         [0., 0., 0., 0.]
     ])
     # Matrix B2-c2
-    model.conv2.weights.data[1] = torch.tensor([
+    model.convs[1].weights.data[1] = torch.tensor([
         [1., 0., 0., 0.],
         [0., 0., 1., 1.]
     ])
     # Matrix A1
-    model.lin_self_1.weight.data = torch.tensor([
+    model.lins[0].weight.data = torch.tensor([
         [1., 0.],
         [0., 0.],
         [0., 0.],
         [0., 0.]
     ])
     # Matrix A2
-    model.lin_self_2.weight.data = torch.tensor([
+    model.lins[1].weight.data = torch.tensor([
         [1., 1., 0., 0.],
         [0., 0., 0., 0.]
     ])
     # Bias b1
-    model.lin_self_1.bias.data = torch.tensor([0.,0.,-1.,1.])
+    model.lins[0].bias.data = torch.tensor([0.,0.,-1.,1.])
     # Bias b2
-    model.lin_self_2.bias.data = torch.tensor([-2.,-1.])
+    model.lins[1].bias.data = torch.tensor([-2.,-1.])
     return model
 
 def example_cdgraph_1():
@@ -129,9 +132,9 @@ def make_mock_fe_1():
     threshold = 0.000123 # sigmoid of 1-10 (GNN architecture does this -10)
     apply_model(cd_graph, device, model, trace)
     # Check the activations match what we expect
-    assert torch.equal(trace.fl0,ex_1_1_activation_0())
-    assert torch.equal(trace.fl1,ex_1_1_activation_1())
-    assert torch.equal(trace.fl2,ex_1_1_activation_2())
+    assert torch.equal(trace.input_features,ex_1_1_activation_0())
+    assert torch.equal(trace.hidden_features[0],ex_1_1_activation_1())
+    assert torch.equal(trace.final_features,ex_1_1_activation_2())
     fe = FactExplainer(device,model,threshold,trace,external_encoder,internal_encoder)
     return fe
 
@@ -157,13 +160,16 @@ def get_fact_ex1():
 # Feature 2: current node is c3-connected to one with feature 2 and is c1-connected to a node with feature 1
 # Feature 3: nothing
 def example_model_2(device):
-    model = GNN(feature_dimension=3, num_edge_colours=4,aggregation_1="max",aggregation_2="max").to(device)
+    model = GNN(
+        dimensions=[3,6,3],
+        num_edge_colours=4,
+        aggregations=["max","max"]).to(device)
     # Checks
     assert model.num_layers == 2
     assert model.num_colours == 4
     assert model.dimensions == [3,6,3]
     # Matrix B1-c1
-    model.conv1.weights.data[0] = torch.tensor([
+    model.convs[0].weights.data[0] = torch.tensor([
     [0., 0., 1.],
     [0., 0., 0.],
     [0., 0., 0.],
@@ -172,7 +178,7 @@ def example_model_2(device):
     [0., 0., 0.]
     ])
     # Matrix B1-c2
-    model.conv1.weights.data[1] = torch.tensor([
+    model.convs[0].weights.data[1] = torch.tensor([
     [0., 0., 0.],
     [0., 0., 0.],
     [0., 0., 0.],
@@ -181,7 +187,7 @@ def example_model_2(device):
     [0., 0., 0.]
     ])
     # Matrix B1-c3
-    model.conv1.weights.data[2] = torch.tensor([
+    model.convs[0].weights.data[2] = torch.tensor([
         [0., 0., 0.],
         [0., 0., 0.],
         [0., 0., 0.],
@@ -190,7 +196,7 @@ def example_model_2(device):
         [0., 0., 0.]
     ])
     # Matrix B1-c4
-    model.conv1.weights.data[3] = torch.tensor([
+    model.convs[0].weights.data[3] = torch.tensor([
         [0., 0., 0.],
         [0., 0., 0.],
         [0., 0., 0.],
@@ -199,31 +205,31 @@ def example_model_2(device):
         [0., 0., 0.]
     ])
     # Matrix B2-c1
-    model.conv2.weights.data[0] = torch.tensor([
+    model.convs[1].weights.data[0] = torch.tensor([
         [0., 0., 0., 0., 0., 0.],
         [1., 0., 0., 0., 0., 0.],
         [0., 0., 0., 0., 0., 0.]
     ])
     # Matrix B2-c2
-    model.conv2.weights.data[1] = torch.tensor([
+    model.convs[1].weights.data[1] = torch.tensor([
         [0., 0., 0., 0., 0., 0.],
         [0., 0., 0., 0., 0., 0.],
         [0., 0., 0., 0., 0., 0.]
     ])
     # Matrix B2-c3
-    model.conv2.weights.data[2] = torch.tensor([
+    model.convs[1].weights.data[2] = torch.tensor([
         [0., 0., 0., 0., 0., 0.],
         [0., 1., 0., 0., 0., 0.],
         [0., 0., 0., 0., 0., 0.]
     ])
     # Matrix B2-c4
-    model.conv2.weights.data[3] = torch.tensor([
+    model.convs[1].weights.data[3] = torch.tensor([
         [0., 0., 0., 0., 0., 0.],
         [0., 0., 0., 0., 0., 0.],
         [0., 0., 0., 0., 0., 0.]
     ])
     # Matrix A1
-    model.lin_self_1.weight.data = torch.tensor([
+    model.lins[0].weight.data = torch.tensor([
         [1., 0., 0.],
         [0., 0., 1.],
         [0., 0., 0.],
@@ -232,15 +238,15 @@ def example_model_2(device):
         [0., 0., 0.]
     ])
     # Matrix A2
-    model.lin_self_2.weight.data = torch.tensor([
+    model.lins[1].weight.data = torch.tensor([
         [0., 0., 0., 0., 0., 0.],
         [0., 0., 0., 0., 0., 0.],
         [0., 0., 0., 0., 0., 0.]
     ])
     # Bias b1
-    model.lin_self_1.bias.data = torch.tensor([-1,0.,0.,0.,0.,0.])
+    model.lins[0].bias.data = torch.tensor([-1,0.,0.,0.,0.,0.])
     # Bias b2
-    model.lin_self_2.bias.data = torch.tensor([0.,-1.,0.])
+    model.lins[1].bias.data = torch.tensor([0.,-1.,0.])
     return model
 
 def example_cdgraph_2():
@@ -309,9 +315,9 @@ def make_mock_fe_2():
     threshold = 0.000123 # sigmoid of 1-10 (GNN architecture does this -10)
     apply_model(cd_graph, device, model, trace)
     # Check the activations match what we expect
-    assert torch.equal(trace.fl0,ex_2_2_activation_0())
-    assert torch.equal(trace.fl1,ex_2_2_activation_1())
-    assert torch.equal(trace.fl2,ex_2_2_activation_2())
+    assert torch.equal(trace.input_features,ex_2_2_activation_0())
+    assert torch.equal(trace.hidden_features[0],ex_2_2_activation_1())
+    assert torch.equal(trace.final_features,ex_2_2_activation_2())
     fe = FactExplainer(device,model,threshold,trace,external_encoder,internal_encoder)
     return fe
 
