@@ -54,7 +54,7 @@ class EquivalentProgramExtractor:
     # We explore layer by layer, to minimise memory usage
     # At each point, we have a 'current_layer' and a 'next_layer'
     # Works as a generator function
-    def extract_rules_for(self,predicate_position):
+    def extract_rules_for(self,predicate_position, deadline=None):
         print("Computing rules for predicate id" + str(predicate_position))
         # Initialisation
         bottom_node = self.base_tree[predicate_position].initial_subtree
@@ -70,6 +70,10 @@ class EquivalentProgramExtractor:
 
         # Main loop. Invariant: 'subsumed' maps each node of the current layer to either true or false
         while current_layer:
+            # Checked between layers and inside the layer: a single layer of soundness
+            # checks can otherwise run far past the time budget.
+            if deadline is not None and time.monotonic() >= deadline:
+                return
             print("Current layers explored: " + str(layer_counter))
             print("Rules extracted so far: " + str(rule_counter))
             # Expand the next layer
@@ -79,6 +83,8 @@ class EquivalentProgramExtractor:
             # Process nodes in the next layer.
             new_subsumed = {} # Make a new dictionary to save memory - we don't need 'subsumed' in the next iter
             for x in next_layer:
+                if deadline is not None and time.monotonic() >= deadline:
+                    return
                 preds = x.get_predecessors()
                 if any(subsumed.get(p, False) for p in preds):
                     new_subsumed[x] = True
@@ -98,9 +104,7 @@ class EquivalentProgramExtractor:
             for pred_pos in range(self.internal_encoder.get_n_unary_predicates()):
                 deadline = time.monotonic() + time_budget if time_budget is not None else None
                 rules_for_this_predicate = set()
-                for compressed_rule_body in self.extract_rules_for(pred_pos):
-                    if deadline is not None and time.monotonic() >= deadline:
-                        break
+                for compressed_rule_body in self.extract_rules_for(pred_pos, deadline):
                     rule_body = self.base_tree[pred_pos].extract_from_compact(compressed_rule_body)
                     head_can_predicate = self.internal_encoder.get_unary_predicate_for_index(pred_pos)
                     head_pred = self.external_encoder.unary_can_predicate_to_data_predicate(head_can_predicate)
@@ -126,4 +130,3 @@ class EquivalentProgramExtractor:
                             rule = written_head + " :- " + ", ".join(body_atoms) + " .\n"
                             output.write(rule + '\n')
         output.close()
-
