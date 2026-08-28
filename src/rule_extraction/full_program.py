@@ -54,8 +54,9 @@ class EquivalentProgramExtractor:
     # We explore layer by layer, to minimise memory usage
     # At each point, we have a 'current_layer' and a 'next_layer'
     # Works as a generator function
-    def extract_rules_for(self,predicate_position):
-        print("Computing rules for predicate id" + str(predicate_position))
+    def extract_smallest_rules_for(self, predicate_position, deadline):
+        pred = self.internal_encoder.unary_pred_position_dict.inverse[predicate_position]
+        print("Computing rules for predicate " + pred)
         # Initialisation
         bottom_node = self.base_tree[predicate_position].initial_subtree
         current_layer = [bottom_node]
@@ -75,10 +76,15 @@ class EquivalentProgramExtractor:
             # Expand the next layer
             next_layer = set() # Seen nodes in the next layer
             for x in current_layer:
-                next_layer.update(x.get_successors())
+                if deadline is not None and time.monotonic() >= deadline:
+                    return
+                if not subsumed[x]:
+                    next_layer.update(x.get_successors())
             # Process nodes in the next layer.
             new_subsumed = {} # Make a new dictionary to save memory - we don't need 'subsumed' in the next iter
             for x in next_layer:
+                if deadline is not None and time.monotonic() >= deadline:
+                    return
                 preds = x.get_predecessors()
                 if any(subsumed.get(p, False) for p in preds):
                     new_subsumed[x] = True
@@ -93,37 +99,64 @@ class EquivalentProgramExtractor:
             current_layer = next_layer
             layer_counter += 1
 
+    def hail_mary(self, predicate_position):
+        node = self.base_tree[predicate_position].initial_subtree
+        while True:
+            if node.check_soundness(
+                    self.device,
+                    self.model,
+                    self.threshold,
+                    predicate_position
+            ):
+                yield node
+                return
+            node = next(node.get_successors(), None)
+            if node is None:
+                return
+
+    def unfold_and_print_rule(self, pred_pos, compressed_rule_body, rules_for_this_predicate, output):
+        rule_body = self.base_tree[pred_pos].extract_from_compact(compressed_rule_body)
+        head_can_predicate = self.internal_encoder.get_unary_predicate_for_index(pred_pos)
+        head_pred = self.external_encoder.unary_can_predicate_to_data_predicate(head_can_predicate)
+        head_pred_arity = self.external_encoder.unary_can_predicate_to_data_predicate_arity(
+            head_can_predicate)
+        rule_bodies, head = self.external_encoder.unfold_all(
+            can_conj=rule_body, internal_encoder=self.internal_encoder, head_predicate=head_pred)
+        for rule_body in rule_bodies:
+            if frozenset(rule_body) not in rules_for_this_predicate:
+                rules_for_this_predicate.add(frozenset(rule_body))
+                # Write the rule
+                body_atoms = []
+                rule_body = set(rule_body)  # Remove duplicates
+                for (s, p, o) in rule_body:
+                    if p == TYPE_PRED:
+                        body_atoms.append("<{}>[?{}]".format(o, s))
+                    else:
+                        body_atoms.append("<{}>[?{},?{}]".format(p, s, o))
+                if head_pred_arity == 2:
+                    written_head = "<{}>[?{},?{}]".format(head[1], head[0], head[2])
+                else:
+                    written_head = "<{}>[?{}]".format(head[2], head[0])
+                rule = written_head + " :- " + ", ".join(body_atoms) + " .\n"
+                output.write(rule + '\n')
+
+
     def get_all_rules(self, program_file, time_budget):
         with (open(program_file, 'w') as output):
             for pred_pos in range(self.internal_encoder.get_n_unary_predicates()):
-                deadline = time.monotonic() + time_budget if time_budget is not None else None
-                rules_for_this_predicate = set()
-                for compressed_rule_body in self.extract_rules_for(pred_pos):
-                    if deadline is not None and time.monotonic() >= deadline:
-                        break
-                    rule_body = self.base_tree[pred_pos].extract_from_compact(compressed_rule_body)
-                    head_can_predicate = self.internal_encoder.get_unary_predicate_for_index(pred_pos)
-                    head_pred = self.external_encoder.unary_can_predicate_to_data_predicate(head_can_predicate)
-                    head_pred_arity = self.external_encoder.unary_can_predicate_to_data_predicate_arity(
-                        head_can_predicate)
-                    rule_bodies, head = self.external_encoder.unfold_all(
-                        can_conj=rule_body, internal_encoder=self.internal_encoder, head_predicate=head_pred)
-                    for rule_body in rule_bodies:
-                        if frozenset(rule_body) not in rules_for_this_predicate:
-                            rules_for_this_predicate.add(frozenset(rule_body))
-                            # Write the rule
-                            body_atoms = []
-                            rule_body = set(rule_body)  # Remove duplicates
-                            for (s, p, o) in rule_body:
-                                if p == TYPE_PRED:
-                                    body_atoms.append("<{}>[?{}]".format(o, s))
-                                else:
-                                    body_atoms.append("<{}>[?{},?{}]".format(p, s, o))
-                            if head_pred_arity == 2:
-                                written_head = "<{}>[?{},?{}]".format(head[1], head[0], head[2])
-                            else:
-                                written_head = "<{}>[?{}]".format(head[2], head[0])
-                            rule = written_head + " :- " + ", ".join(body_atoms) + " .\n"
-                            output.write(rule + '\n')
+                # TODO undo this if. This is a quick and dirty thing for a specific application.
+                if self.internal_encoder.unary_pred_position_dict.inverse[pred_pos] == "positive":
+                    deadline = time.monotonic() + time_budget if time_budget is not None else None
+                    rules_for_this_predicate = set()
+                    rule_counter = 0
+                    for compressed_rule_body in self.extract_smallest_rules_for(pred_pos, deadline):
+                        rule_counter += 1
+                        self.unfold_and_print_rule(pred_pos, compressed_rule_body, rules_for_this_predicate, output)
+                    if rule_counter == 0:
+                        print("Time's up, going for a Hail Mary...")
+                        compressed_rule_body = next(self.hail_mary(pred_pos), None)
+                        if compressed_rule_body is not None:
+                            self.unfold_and_print_rule(pred_pos, compressed_rule_body, rules_for_this_predicate, output)
+
         output.close()
 

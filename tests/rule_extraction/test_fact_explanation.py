@@ -129,9 +129,9 @@ def make_mock_fe_1():
     threshold = 0.000123 # sigmoid of 1-10 (GNN architecture does this -10)
     apply_model(cd_graph, device, model, trace)
     # Check the activations match what we expect
-    assert torch.equal(trace.fl0,ex_1_1_activation_0())
-    assert torch.equal(trace.fl1,ex_1_1_activation_1())
-    assert torch.equal(trace.fl2,ex_1_1_activation_2())
+    assert torch.equal(trace.activations[0],ex_1_1_activation_0())
+    assert torch.equal(trace.activations[1],ex_1_1_activation_1())
+    assert torch.equal(trace.activations[2],ex_1_1_activation_2())
     fe = FactExplainer(device,model,threshold,trace,external_encoder,internal_encoder)
     return fe
 
@@ -309,9 +309,9 @@ def make_mock_fe_2():
     threshold = 0.000123 # sigmoid of 1-10 (GNN architecture does this -10)
     apply_model(cd_graph, device, model, trace)
     # Check the activations match what we expect
-    assert torch.equal(trace.fl0,ex_2_2_activation_0())
-    assert torch.equal(trace.fl1,ex_2_2_activation_1())
-    assert torch.equal(trace.fl2,ex_2_2_activation_2())
+    assert torch.equal(trace.activations[0],ex_2_2_activation_0())
+    assert torch.equal(trace.activations[1],ex_2_2_activation_1())
+    assert torch.equal(trace.activations[2],ex_2_2_activation_2())
     fe = FactExplainer(device,model,threshold,trace,external_encoder,internal_encoder)
     return fe
 

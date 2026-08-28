@@ -1,5 +1,5 @@
 import torch
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 # Implementation of a (col,d)-graph. It simply packages many variables into one for convenience, with some checks.
 # Colours are ALWAYS represented by integers 1...n (this is what the pytorch geometric model needs)
@@ -38,8 +38,5 @@ class CDGraph:
 
 @dataclass
 class TraceCollector:
-
     cd_graph: CDGraph = None
-    fl2: torch.Tensor = None
-    fl1: torch.Tensor = None
-    fl0: torch.Tensor = None
+    activations: dict[int, torch.Tensor] = field(default_factory=dict)

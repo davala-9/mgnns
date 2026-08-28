@@ -1,3 +1,5 @@
+from base64 import encode
+
 import torch
 from torch_geometric.data import Data, DataLoader
 import argparse
@@ -37,15 +39,19 @@ def setup_experiment(args):
     shutil.copy(args.config_file, experiment_folder)  # Copy configuration into experiment folder
     return cfg, experiment_folder
 
-def setup_encoder(cfg: ExperimentConfig, exp_folder: Path, load_model: str | None):
-    if load_model:
-        print("Loading encoder from file...")
-        load_ef = Path(load_model)
-        internal_encoder = CanonicalEncoderDecoder(check(load_ef / 'internal_encoder.tsv', "Internal encoding"))
-        if cfg.encoding_scheme == EncoderType.ICLR22:
-            external_encoder = ICLREncoderDecoder(check(load_ef / 'external_encoder.tsv', "External encoding"))
-        else:
-            external_encoder = IdentityEncoderDecoder(check(load_ef / 'external_encoder.tsv', "External encoding"))
+def load_encoder(path_name, encoding_scheme):
+    print("Loading encoder from file...")
+    load_ef = Path(path_name)
+    internal_encoder = CanonicalEncoderDecoder(check(load_ef / 'internal_encoder.tsv', "Internal encoding"))
+    if encoding_scheme == EncoderType.ICLR22:
+        external_encoder = ICLREncoderDecoder(check(load_ef / 'external_encoder.tsv', "External encoding"))
+    else:
+        external_encoder = IdentityEncoderDecoder(check(load_ef / 'external_encoder.tsv', "External encoding"))
+    return external_encoder, internal_encoder
+
+def setup_encoder(cfg: ExperimentConfig, exp_folder: Path, encoder_pathname: str | None):
+    if encoder_pathname:
+       external_encoder, internal_encoder = load_encoder(encoder_pathname, cfg.encoding_scheme)
     else:
         print("Creating Encoder-Decoders...")
         # Set-up Encoder-Decoder
@@ -65,11 +71,14 @@ def setup_encoder(cfg: ExperimentConfig, exp_folder: Path, load_model: str | Non
         internal_encoder.save_to_file(exp_folder / 'internal_encoder.tsv')
     return external_encoder, internal_encoder
 
-def setup_model(cfg: ExperimentConfig, exp_folder, device, ext_enc, int_enc, load_model: str | None):
+def load_model(model_pathname, device):
+    load_ef = Path(model_pathname)
+    return torch.load(check(load_ef / "model.pt", "Model"), weights_only=False, map_location=device).to(device)
+
+def setup_model(cfg: ExperimentConfig, exp_folder, device, ext_enc, int_enc, with_model: str | None):
     # Training (or Model Loading, if training is skipped)
-    if load_model:
-        load_ef = Path(load_model)
-        model = torch.load(check(load_ef / "model.pt", "Model"), weights_only=False).to(device)
+    if with_model:
+        model = load_model(with_model, device)
     else:
         print("Training...")
         # Load & encode training data
@@ -119,13 +128,13 @@ def save_predictions(ef, predictions):
             output2.write("{}\t{}\t{}\t{}\n".format(s, p, o, score))
     output.close()
 
-def extract_program(ef, device, model, cfg, external_encoder, internal_encoder):
+def extract_program(ef, device, model, threshold, external_encoder, internal_encoder):
     print("Computing full equivalent program...")
     program_file = ef / "program.txt"
-    program_extractor = EquivalentProgramExtractor(device, model, cfg.derivation_threshold, external_encoder,
+    program_extractor = EquivalentProgramExtractor(device, model, threshold, external_encoder,
                                                    internal_encoder)
     program_extractor.compute_all_upper_bounds()
-    program_extractor.get_all_rules(program_file, 30)
+    program_extractor.get_all_rules(program_file, 50000)
 
 def explain_facts(ef,predictions,device,model,cfg,trace,external_encoder, internal_encoder, test_graph_dataset):
     print("Computing prediction explanations...")
@@ -152,7 +161,7 @@ if __name__ == "__main__":
                                                   exp_folder)
     save_predictions(exp_folder, predictions)
     if not args.skip_program:
-        extract_program(exp_folder, device, model, cfg, external_encoder, internal_encoder)
+        extract_program(exp_folder, device, model, cfg.derivation_threshold, external_encoder, internal_encoder)
     explain_facts(exp_folder,predictions,device,model,cfg,trace,external_encoder, internal_encoder, test_graph_dataset)
 
 # TODO: Separate responsabilities better in the test method.

@@ -30,9 +30,9 @@ def apply_model(cd_graph:CDGraph, device, model, trace_collector=None):
     features_layer_2, features_layer_1 = model(data)  # note: features_layer_1 comes already detached
     if trace_collector is not None:
         trace_collector.cd_graph = cd_graph
-        trace_collector.fl2 = features_layer_2.detach().clone()
-        trace_collector.fl1 = features_layer_1.clone()
-        trace_collector.fl0 = data.x.detach().clone()
+        trace_collector.activations[2] = features_layer_2.detach().clone()
+        trace_collector.activations[1] = features_layer_1.clone()
+        trace_collector.activations[0] = data.x.detach().clone()
 
     # PyTorch Decoding: pytorch geometric graph -> cd_graph
     return CDGraph(cd_graph.col_size, cd_graph.delta, features_layer_2.detach().clone(), cd_graph.edges,

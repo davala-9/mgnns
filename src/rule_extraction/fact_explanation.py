@@ -31,7 +31,7 @@ class FactExplainer:
         self.threshold = threshold
         self.external_encoder = external_encoder
         self.internal_encoder = internal_encoder
-        self.activations = [trace.fl0,trace.fl1,trace.fl2] # Index matches layer
+        self.activations = trace.activations
         self.cd_graph = trace.cd_graph
         self.node_to_index = {node: i for i, node in enumerate(self.cd_graph.node_names)}  # Helpful dictionary
         self.input_dataset = input_dataset

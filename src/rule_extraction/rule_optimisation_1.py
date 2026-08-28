@@ -1,94 +1,78 @@
-from src.gnn_transformation import apply_c_encoder, apply_model
-from utils import type_pred
-from fact_explanation import FactExplainer, BasicExplanation
-import torch
-from gnn_transformation import apply_gnn_transformation
-from torch_geometric.data import Data
-import numpy as np
+from fact_explanation import FactExplainer
+from src.rule_extraction.tree_shaped_conjunction import TreeShapedConjunction, Variable
+from src.utils.bitset import BitSet
+from src.model.cd_graph import TraceCollector
+from src.model.gnn_transformation import apply_model
 
-# BEST APPROXIMATION 1
+# OPTIMISATION 1
 # Make a dictionary of all unary atoms of gamma_i and compute an ``influence'' value of each
 # by creating the minimal sub-rule of Gamma_i that connects this atom with the head variable.
 # Ground such rule and apply the GNN to it, then check the value of the node and position corresponding to the head
-# fact. If zero, start travelling backwards through the relevant list of colours until you find one that
-# has relevant nodes not equal to zero.
+# fact. If zero, start travelling backwards through the relevant part of the computation graph; at each node of the
+# computation tree, sum the values of the relevant positions of the activations. Keep doing this until not zero.
 
-# Auxiliary method to quickly test if a dataset suffices to derive the target fact
-def test_gr_dataset(body, fe: FactExplainer):
-    if not body:
-        gr_features = torch.FloatTensor(np.zeros((1, fe.model.layer_dimension(0))))
-        gr_edge_list = torch.LongTensor(2, 0)
-        gr_dataset = Data(x=gr_features, edge_index=gr_edge_list, edge_type=torch.LongTensor([])).to(fe.device)
-        gnn_output_gr = fe.model(gr_dataset)
-        return gnn_output_gr[0][fe.cd_fact_pred_pos] >= fe.threshold
-    else:
-        cd_graph = apply_c_encoder(body,fe.internal_encoder)
-        output_cd_graph = apply_model(cd_graph, fe.device, fe.model)
-        return output_cd_graph.features[fe.cd_fact_const_index][fe.cd_fact_pred_pos] >= fe.threshold
+# Compute the influence value for this contributor
+def compute_influence(temp_tree: TreeShapedConjunction, fe: FactExplainer, trace: TraceCollector, variable: Variable,
+                      new_vars_to_original_vars: dict[Variable,Variable], pos: int,
+                      var_layer_mask: dict[tuple[Variable, int], BitSet],
+                      contributors_to_influence_dict: dict[(Variable,int),(int, float)]):
+    contribution_score = 0
+    current_variable = temp_tree.root_node
+    next_variable = next(iter(current_variable.children.values()), None)
+    for l in range(fe.model.num_layers, -1, -1):
+        # Identify the correct variable for this step of the computation.
+        # This matters because there might be level jumps between variables.
+        if 0 < l == next_variable.level:
+            current_variable = next_variable
+            next_variable = next(iter(current_variable.children.values()), None)
+        original_variable = new_vars_to_original_vars[current_variable]
+        for k in var_layer_mask[original_variable,l].elements():
+            current_variable_id = temp_tree.index_tree.node_to_id[current_variable]
+            contribution_score += trace.activations[l][current_variable_id][k]
+        if contribution_score > 0:
+            contributors_to_influence_dict[(variable, pos)] = (l, contribution_score)
+            break
+    contributors_to_influence_dict[(variable, pos)] = (0,0)
 
-def run_optimisation_1(fe: FactExplainer):
 
-    L = fe.model.num_layers
+def apply_optimisation(fe: FactExplainer, rule_body: TreeShapedConjunction, predicate_position: int,
+                         var_const_idx: dict[Variable, int], var_layer_mask: dict[tuple[Variable, int], BitSet]):
 
     # First we compute a dictionary that maps each unary atom U_j(y) in \Gamma_i, represented by the pair (y,j), to a
     # "contribution": a pair (layer, value) representing the first layer (from the end) where this has a non-zero
     # contribution, and "value" is the value of this contribution.
-
-    # Maps each variable to a quadruple (var, l, col, j) indicating the "parent" of each variable.
-    successors_reverse = {v: k for k, v in fe.basic_explanation.successors.items()}
-
-    # Extract the minimal sub-conjunction of Basic Rule which connects U_j(y) to the head variable
-    def get_minimal_subconjunction(y,j):
-        variable_progression = [y]  # maps each layer to the variable that ``carries'' U_j(y)'s contribution
-        mini_dataset = [(y, type_pred, fe.internal_encoder.get_unary_predicate_for_index(j))]
-        for l in range(1, L + 1):
-            prev_var = variable_progression[-1]
-            next_var, ell, col, _ = successors_reverse[prev_var]
-            if l == ell:
-                mini_dataset.append((prev_var, fe.internal_encoder.get_binary_predicate_for_colour(col), next_var))
-                variable_progression.append(next_var)
-            else:
-                variable_progression.append(prev_var)
-        return mini_dataset, variable_progression
-
     contributors_to_influence_dict = {}
-    # Iterate over each fact U_j(y) in the Basic Rule
-    for y in fe.basic_explanation.variable_to_level:
-        for j in fe.basic_explanation.relevant_positions[(y, 0)]:
-            mini_dataset, variable_progression = get_minimal_subconjunction(y,j)
-            # Apply the GNN to this conjunction
-            graph = fe.internal_encoder.encode_dataset(mini_dataset)
-            node_index_dict = graph.get_node_name_to_index_dict()
-            gr_dataset = Data(x=graph.features, edge_index=graph.edges, edge_type=graph.edge_colours).to(fe.device)
-            gnn_output_gr, _ = fe.model(gr_dataset)
-            # Compute its influence
-            for l in range(L,-1,-1):
-                contribution_score = 0
-                for k in fe.basic_explanation.relevant_positions[(variable_progression[l],l)]:
-                    contribution_score = (contribution_score +
-                                          gnn_output_gr[node_index_dict[variable_progression[l]]][k])
-                if contribution_score > 0:
-                    contributors_to_influence_dict[(y,j)] = (l, contribution_score)
-                    break
-            if (y,j) not in contributors_to_influence_dict:
-                contributors_to_influence_dict[(y, j)] = (0, 0)
-
-    # Start trying rules, adding atoms in increasing order of contribution
+    for variable in var_const_idx:  # Iterate over each unary fact in the input rule
+        if variable.features.is_empty():
+            continue
+        temp_tree, new_vars_to_original_vars = rule_body.get_subtree_for(variable)
+        new_variable = new_vars_to_original_vars.inverse[variable]
+        relevant_positions = var_layer_mask[(variable,0)].elements()
+        for pos in relevant_positions:
+            new_variable.features = BitSet.from_subset(variable.features.dimension,{pos}) # mask holds only relevant pos
+            temp_cd_graph = temp_tree.as_cd_graph() # recall that this ensures that node id matches the tree's index
+            trace = TraceCollector()
+            apply_model(temp_cd_graph, fe.device, fe.model,trace)
+            compute_influence(temp_tree,fe,trace,variable,new_vars_to_original_vars,pos,var_layer_mask,
+                              contributors_to_influence_dict)
+    # Next we sort contributors by contribution.
     contributors_list = []
-    for (y, j) in contributors_to_influence_dict:
-        contributors_list.append((contributors_to_influence_dict[(y, j)], y, j))
-    contributors_list = sorted(contributors_list)
-    current_body_set = set()
-    output_body = None
-    while not output_body:
-        if test_gr_dataset(current_body_set):
-            output_body = current_body_set
-        else:
-            (inf, vy, pj) = contributors_list.pop()
-            current_body_set = current_body_set.union(get_minimal_subconjunction(vy, pj))
+    for (y, j), (s,l) in contributors_to_influence_dict.items():
+        contributors_list.append((s, l, y, j))
+        contributors_list = sorted(contributors_list)
 
-    return list(output_body)
-
-
+    # Start trying rules from the empty rule, adding atoms in increasing order of contribution
+   # Initialise empty rule
+    new_root = rule_body.root_node.shallow_copy()
+    temp_tree = TreeShapedConjunction(root_node=new_root, n_colours=rule_body.n_colours)
+    while contributors_list:
+        influence_score, layer, var, pos = contributors_list.pop()
+        new_tree = rule_body.get_subtree_for(var)
+        temp_tree.append(new_tree)
+        temp_cd_graph = temp_tree.as_cd_graph()
+        output_graph = apply_model(temp_cd_graph, fe.device, fe.model)
+        if output_graph.features[0][predicate_position] > fe.threshold:
+            return temp_tree
+    raise AssertionError("This part of the code should not be reachable. There's a bug in Optimisation 1")
 
     # TODO ITP: maybe a clean-up step like in approximation 2 can help make improvements
