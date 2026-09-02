@@ -62,17 +62,15 @@ class IdentityEncoderDecoder(NonCanonicalEncoder):
             data_var_counter += 1
             return data_var_prefix + str(data_var_counter)
 
-        def unfold_variable(can_var: Variable, data_var: str):
-            for feat in can_var.get_feature_list():
+        var_id_to_datavar = {0: root_variable}
+        for var_id in range(len(can_conj)):
+            for feat in can_conj.features[var_id]:
                 can_predicate = internal_encoder.unary_pred_position_dict.inverse[feat]
-                data_conj.append((data_var, TYPE_PRED, can_predicate)) # canonical predicate is data predicate
-            for (_, col, _), child_var in can_var.children.items():
-                new_data_var = new_variable()
+                data_conj.append((var_id_to_datavar[var_id], TYPE_PRED, can_predicate)) # canonical pred is data pred
+            for (_, col, _), child_id in can_conj.children[var_id].items():
+                var_id_to_datavar = {child_id: new_variable()}
                 bin_predicate = internal_encoder.binary_pred_colour_dict.inverse[col]
-                data_conj.append((new_data_var, bin_predicate, data_var))
-                unfold_variable(child_var, new_data_var)
-
-        unfold_variable(can_conj.root_node, root_variable)
+                data_conj.append((var_id_to_datavar[child_id], bin_predicate, var_id_to_datavar[var_id])) # This order
         head = (root_variable, TYPE_PRED, head_predicate)
 
         return [data_conj], head

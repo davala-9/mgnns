@@ -53,7 +53,7 @@ class RuleOptimisation3:
 
     def graph_search(self, frontier: Frontier, timeout: float | None = None):
         start = time.monotonic()
-        frontier.push(self.base_tree.initial_subtree)
+        frontier.push(self.base_tree.initial_compact)
         explored = set()
         while not frontier.is_empty():
             if timeout is not None and time.monotonic() - start > timeout:

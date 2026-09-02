@@ -20,6 +20,7 @@ import re
 from tqdm import tqdm
 import os.path
 import sys
+import bisect
 
 from src.utils.bitset import BitSet
 
@@ -28,6 +29,13 @@ from src.utils.bitset import BitSet
 
 rdfox_server = "http://localhost:8080"
 TYPE_PRED = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type'
+
+def find_index_and_insert(sorted_list: list[int], element: int) -> tuple[int, bool]:
+    idx = bisect.bisect_left(sorted_list, element)
+    if idx == len(sorted_list) or sorted_list[idx] != element:
+        sorted_list.insert(idx, element)
+        return idx, True
+    return idx, False
 
 def check(path: Path, fileid):
     if not os.path.exists(path):

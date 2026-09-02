@@ -1,8 +1,6 @@
-from networkx.algorithms.dominance import immediate_dominators
-
 from src.encodings.canonical import CanonicalEncoderDecoder
 from src.encodings.noncanonical.noncanonical import NonCanonicalEncoder
-from src.rule_extraction.tree_shaped_conjunction import Variable, TreeShapedConjunction
+from src.rule_extraction.tree_shaped_conjunction import TreeShapedConjunction, TreeShapedConjunctionBuilder
 from src.utils.bitset import BitSet
 from src.utils.utils import backpropagate_relevance, TYPE_PRED
 import time
@@ -20,30 +18,31 @@ class EquivalentProgramExtractor:
 
     # Build initial upper bound/search space for a given position/predicate
     def compute_tree_for(self, predicate_position):
+        explanation_builder = TreeShapedConjunctionBuilder(self.internal_encoder.get_n_binary_predicates())
         L = self.model.num_layers
+        explanation_builder.add(features=None,level=L,parent=None)
+        # Companion to basic_explanation. Maps a (var id, layer) to the relevant Feature Mask. This is the paper's \mu.
         initial_mask = BitSet.from_subset(self.internal_encoder.get_n_unary_predicates(),{predicate_position})
-        root_variable = Variable(level=L)
-        conjunction = TreeShapedConjunction(root_variable, self.internal_encoder.get_n_binary_predicates())
-        # Maps a (Variable, Layer) to the relevant Feature Mask. This is the paper's \mu.
-        var_layer_mask = {(root_variable, L): initial_mask}
+        var_layer_mask = {(0, L): initial_mask}
         # Paper's algorithm for constructing the conjunction
         for l in range(L, 0, -1):  # Iterate backwards over all layers from L to 1 (both inclusive).
-            for var in conjunction.walk():
-                var_layer_mask[(var, l - 1)] = backpropagate_relevance(var_layer_mask[(var, l)],
-                                                                       self.model.matrix_A(l))
+            num_vars = explanation_builder.num_vars()
+            for var_id in range(num_vars):
+                var_layer_mask[(var_id, l - 1)] =\
+                    backpropagate_relevance(var_layer_mask[(var_id, l)], self.model.matrix_A(l))
                 # Introduce children new variables for var and define their relevant positions
                 for colour in self.internal_encoder.get_colours():
-                    for j in backpropagate_relevance(var_layer_mask[(var, l)],
+                    for j in backpropagate_relevance(var_layer_mask[(var_id, l)],
                                                      self.model.matrix_B(l, colour)).elements():
-                        new_variable = Variable(level=l - 1)
-                        var.children[(l, colour, j)] = new_variable
-                        var_layer_mask[(new_variable, l - 1)] = (
-                            BitSet.from_subset(self.model.layer_dimension(l - 1), {j}))
+                        new_var_id = (
+                            explanation_builder.add(features=None, level=l - 1, parent=var_id, edge=(l, colour, j)))
+                        var_layer_mask[(new_var_id, l - 1)] = \
+                            BitSet.from_subset(self.model.layer_dimension(l - 1), {j})
 
-        for var in conjunction.walk():  # Add the atoms for the feature vectors in layer 0
-            var.features = var_layer_mask[(var, 0)]
+        for var_id in range(explanation_builder.num_vars()):  # Add the atoms for the feature vectors in layer 0
+            explanation_builder.features[var_id] = var_layer_mask[(var_id, 0)]
             # Needs to be done separately, otherwise this is not done to the new variables added!
-        return conjunction
+        return explanation_builder.build()
 
     # Build all search spaces
     def compute_all_upper_bounds(self):
@@ -58,7 +57,7 @@ class EquivalentProgramExtractor:
         pred = self.internal_encoder.unary_pred_position_dict.inverse[predicate_position]
         print("Computing rules for predicate " + pred)
         # Initialisation
-        bottom_node = self.base_tree[predicate_position].initial_subtree
+        bottom_node = self.base_tree[predicate_position].initial_compact
         current_layer = [bottom_node]
         subsumed = {} # Dictionary of nodes that are subsumed already by some smaller sound node
         if bottom_node.check_soundness(self.device, self.model, self.threshold, predicate_position):
@@ -100,7 +99,7 @@ class EquivalentProgramExtractor:
             layer_counter += 1
 
     def hail_mary(self, predicate_position):
-        node = self.base_tree[predicate_position].initial_subtree
+        node = self.base_tree[predicate_position].initial_compact
         while True:
             if node.check_soundness(
                     self.device,

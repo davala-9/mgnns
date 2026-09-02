@@ -5,7 +5,7 @@ from src.model.cd_graph import TraceCollector, CDGraph
 from src.model.gnn_transformation import apply_gnn_transformation, apply_model, apply_c_decoder, apply_nc_decoder
 from src.encodings.canonical import CanonicalEncoderDecoder
 from src.encodings.noncanonical.noncanonical import NonCanonicalEncoder, GroundContext
-from src.rule_extraction.tree_shaped_conjunction import TreeShapedConjunction, Variable
+from src.rule_extraction.tree_shaped_conjunction import TreeShapedConjunctionBuilder
 from src.utils.utils import TYPE_PRED, backpropagate_relevance
 from src.utils.bitset import BitSet
 from src.rule_extraction.rule_optimisation_3 import RuleOptimisation3
@@ -39,56 +39,46 @@ class FactExplainer:
     # This is the Gamma_i in the papers. It computes a most general explanation but prunes exploiting matrix sparsity
     # Takes a Fact as input, but wrapped with some auxiliary values as a FactContext
     def get_basic_explanation(self, fact_context: FactContext):
-
-        # We initialise the conjunction as an empty tree-shaped conjunction
+        explanation_builder = TreeShapedConjunctionBuilder(self.internal_encoder.get_n_binary_predicates())
         L = self.model.num_layers
-        initial_mask = BitSet.from_subset(self.internal_encoder.get_n_unary_predicates(),
-                                          {fact_context.cd_fact_pred_pos})
-        root_variable = Variable(level=L)
-        conjunction = TreeShapedConjunction(root_variable, self.internal_encoder.get_n_binary_predicates())
-        # Maps a Variable to the (index of the) constant that grounds it. This is the \nu mapping in the paper
-        var_const_idx = {root_variable: fact_context.cd_fact_const_index}
-        # Maps a (Variable, Layer) to the relevant Feature Mask. This is the paper's \mu.
-        var_layer_mask = {(root_variable, L): initial_mask}
-
+        explanation_builder.add(features=None,level=L,parent=None) # Root node
+        # Companion to basic_explanation. Maps a variable id to the id of the constant that grounds it. \nu in the paper
+        varid_2_constid = [fact_context.cd_fact_const_index]
+        # Companion to basic_explanation. Maps a (var id, layer) to the relevant Feature Mask. This is the paper's \mu.
+        initial_mask = BitSet.from_subset(self.model.layer_dimension(L),{fact_context.cd_fact_pred_pos})
+        var_layer_mask = {(0, L): initial_mask}
         # Paper's algorithm for constructing the conjunction
         for l in range(L, 0, -1):  # Iterate backwards over all layers from L to 1 (both inclusive).
-            for var in conjunction.walk():
-                var_layer_mask[(var, l - 1)] = backpropagate_relevance(var_layer_mask[(var, l)],
+            num_vars = explanation_builder.num_vars()
+            for var_id in range(num_vars):
+                var_layer_mask[(var_id, l - 1)] = backpropagate_relevance(var_layer_mask[(var_id, l)],
                                                                        self.model.matrix_A(l),
-                                                                       self.activations[l - 1][var_const_idx[var]])
+                                                                       self.activations[l - 1][varid_2_constid[var_id]])
                 # Introduce children new variables for var and define their relevant positions
                 for colour in self.internal_encoder.get_colours():
                     edge_mask = self.cd_graph.edge_colours == colour
                     colour_edges = self.cd_graph.edges[:, edge_mask]
-                    neighbours = colour_edges[:, colour_edges[1] == var_const_idx[var]][0].tolist()
+                    neighbours = colour_edges[:, colour_edges[1] == varid_2_constid[var_id]][0].tolist()
                     if not neighbours:
                         continue
                     neighbour_vectors = np.array([self.activations[l - 1][neighbour] for neighbour in neighbours])
-                    for j in backpropagate_relevance(var_layer_mask[(var,l)],
+                    for j in backpropagate_relevance(var_layer_mask[(var_id,l)],
                                                      self.model.matrix_B(l, colour),
                                                      previous_activations=None).elements():
                         # Find the neighbour that contributes maximum to aggregation
                         best_idx = np.argmax(neighbour_vectors[:, j])
                         if neighbour_vectors[best_idx, j] > 0:
-                            new_variable = Variable(level=l - 1)
-                            var.children[(l, colour, j)] = new_variable
-                            var_const_idx[new_variable] = neighbours[best_idx]
-                            var_layer_mask[(new_variable, l - 1)] = (
+                            new_var_id = (
+                                explanation_builder.add(features=None,level=l-1,parent=var_id,edge=(l, colour, j)))
+                            varid_2_constid[new_var_id] = neighbours[best_idx]
+                            var_layer_mask[(new_var_id, l - 1)] = (
                                 BitSet.from_subset(self.model.layer_dimension(l - 1), {j}))
 
-        for var in conjunction.walk():  # Add the atoms for the feature vectors in layer 0
-            var.features = var_layer_mask[(var, 0)]
+        for var_id in range(explanation_builder.num_vars()):  # Add the atoms for the feature vectors in layer 0
+            explanation_builder.features[var_id] = var_layer_mask[(var_id, 0)]
             # Needs to be done separately, otherwise this is not done to the new variables added!
 
-        # TODO: Redo this
-        # (gr_features, node_to_gr_row_dict, gr_edge_list, gr_colour_list) = self.can_encoder_decoder.encode_dataset(gamma_i)
-        # gnn_output_gr, _  = self.model(Data(x=gr_features, edge_index=gr_edge_list, edge_type=gr_colour_list).to(self.device))
-        # assert (gnn_output_gr[node_to_gr_row_dict[nodes.const_node_dict[x1]]][cd_fact_pred_pos] >=
-        #         self.cfg.derivation_threshold), "ERROR: Gamma_i is not sound. This should not happen; there's a bug."
-        # TODO: also check that the variable levels match the \mu and the trees.
-
-        return conjunction, var_const_idx, var_layer_mask
+        return explanation_builder.build(), varid_2_constid, var_layer_mask
 
     def explain_fact(self, fact: tuple[str,str,str]):
 

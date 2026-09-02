@@ -1,5 +1,8 @@
 from dataclasses import dataclass
 
+from sympy.codegen.fnodes import dimension
+
+
 @dataclass(frozen=True,slots=True)
 class BitSet:
 
@@ -30,6 +33,11 @@ class BitSet:
 
     def elements(self):
         return [i for i in range(self.dimension) if self.mask & (1 << i)]
+
+    def add_element(self,element):
+        if element >= self.dimension:
+            raise ValueError(f"Cannot add element {element} to a bitset of dimension {self.dimension}")
+        return BitSet.from_subset(self.dimension,{self.as_set().union({element})})
 
     def subsetOf(self, other):
         if self.dimension != other.dimension:
