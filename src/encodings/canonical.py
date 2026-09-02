@@ -3,7 +3,6 @@ from src.utils.utils import TYPE_PRED
 from bidict import bidict
 from src.model.cd_graph import CDGraph
 from collections import defaultdict
-import sys
 
 class CanonicalEncoderDecoder:
 
@@ -18,15 +17,22 @@ class CanonicalEncoderDecoder:
 
         if load_from_document is not None:
             # We trust the document!
-            for line in open(load_from_document, 'r').readlines():
-                arity, position, predicate = line.split()
-                if arity == "UNARY":
-                    self.unary_pred_position_dict[predicate] = int(position)
-                elif arity == "BINARY":
-                    self.binary_pred_colour_dict[predicate] = int(position)
-                else:
-                    sys.exit("ERROR: line not recognised: {}".format(line))
+            with open(load_from_document, 'r') as input_file:
+                for line in input_file.readlines():
+                    arity, position, predicate = line.split()
+                    if arity == "UNARY":
+                        self.unary_pred_position_dict[predicate] = int(position)
+                    elif arity == "BINARY":
+                        self.binary_pred_colour_dict[predicate] = int(position)
+                    else:
+                        raise ValueError("ERROR: line not recognised: {}".format(line))
+            if not self.unary_pred_position_dict:
+                raise ValueError(f"No unary predicates found in {load_from_document}")
+            if not self.binary_pred_colour_dict:
+                raise ValueError(f"No binary predicates found in {load_from_document}")
         else:
+            if unary_predicates is None or binary_predicates is None:
+                raise ValueError("unary_predicates and binary_predicates must be provided when load_from_document is not used")
             for i, predicate in enumerate(unary_predicates):
                 self.unary_pred_position_dict[predicate] = i
             if not self.unary_pred_position_dict:
@@ -52,46 +58,45 @@ class CanonicalEncoderDecoder:
         return len(self.binary_pred_colour_dict)
 
     def save_to_file(self, target_file):
-        output = open(target_file, 'w')
-        for i in self.unary_pred_position_dict.inverse:
-            output.write("{}\t{}\t{}\n".format("UNARY", i, self.unary_pred_position_dict.inverse[i]))
-        for i in self.binary_pred_colour_dict.inverse:
-            output.write("{}\t{}\t{}\n".format("BINARY", i, self.binary_pred_colour_dict.inverse[i]))
-        output.close()
+        with open(target_file, 'w') as output:
+            for i in self.unary_pred_position_dict.inverse:
+                output.write("{}\t{}\t{}\n".format("UNARY", i, self.unary_pred_position_dict.inverse[i]))
+            for i in self.binary_pred_colour_dict.inverse:
+                output.write("{}\t{}\t{}\n".format("BINARY", i, self.binary_pred_colour_dict.inverse[i]))
 
     # Given a (col,d)-dataset, returns its resulting (col,d)-graph
     def encode_dataset(self, dataset):
 
-        nodename_feature_dict = defaultdict(lambda: torch.zeros(delta, dtype=torch.float))
-        edges = set()
         delta = len(self.unary_pred_position_dict)
         col_size = len(self.binary_pred_colour_dict)
+        nodename_feature_dict = defaultdict(lambda: torch.zeros(delta, dtype=torch.float))
+        edges = set()
 
         for RDF_triple in dataset:
             if RDF_triple[1] == TYPE_PRED:  # Fact of form C(a), written (a type C)
                 if RDF_triple[2] not in self.unary_pred_position_dict:
-                    sys.exit(f"Predicate {RDF_triple[2]} not in the list of unary predicates recognised by this encoder.")
+                    raise ValueError(f"Predicate {RDF_triple[2]} not in the list of unary predicates recognised by this encoder.")
                 nodename_feature_dict[RDF_triple[0]][self.unary_pred_position_dict[RDF_triple[2]]] = 1
             else:  # Fact of form R(a,b), written (a R b)
                 if RDF_triple[1] not in self.binary_pred_colour_dict:
-                    sys.exit(f"Predicate {RDF_triple[1]} not in the list of binary predicates recognised by this encoder.")
-                if RDF_triple[0] not in nodename_feature_dict:
-                    nodename_feature_dict[RDF_triple[0]] = torch.zeros(delta, dtype=torch.float)
-                if RDF_triple[2] not in nodename_feature_dict:
-                    nodename_feature_dict[RDF_triple[2]] = torch.zeros(delta, dtype=torch.float)
+                    raise ValueError(f"Predicate {RDF_triple[1]} not in the list of binary predicates recognised by this encoder.")
+                # Subscript access (not assignment) is enough to trigger the defaultdict's zero-tensor factory
+                nodename_feature_dict[RDF_triple[0]]
+                nodename_feature_dict[RDF_triple[2]]
                 edges.add((RDF_triple[0], RDF_triple[2], RDF_triple[1]))
 
-        features = torch.FloatTensor(torch.stack(list(nodename_feature_dict.values())))
+        features = torch.stack(list(nodename_feature_dict.values()))
         assert features.shape[1] == delta
         node_names = list(nodename_feature_dict.keys()) # Correctness of this relies on dictionaries being ordered.
         edge_list = []
         edge_colour_list = []
         node_index = {name: i for i, name in enumerate(node_names)}
-        for oc, dc, pred in edges:
-            edge_list.append([node_index[oc], node_index[dc]])
+        for origin, destination, pred in edges:
+            edge_list.append([node_index[origin], node_index[destination]])
             edge_colour_list.append(self.binary_pred_colour_dict[pred])
+        edges_tensor = torch.LongTensor(edge_list).reshape(-1, 2).t().contiguous()
         return CDGraph(col_size=col_size, delta=len(self.unary_pred_position_dict),
-                       features=features, edges= torch.LongTensor(torch.LongTensor(edge_list).t().contiguous()),
+                       features=features, edges=edges_tensor,
                        edge_colours=torch.LongTensor(edge_colour_list), node_names=node_names)
 
     # Returns a dictionary where the keys are cd_facts and the values are their scores
