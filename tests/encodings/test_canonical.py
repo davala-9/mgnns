@@ -17,7 +17,7 @@ def test_init_with_predicates():
     assert enc.get_n_unary_predicates() == 2
     assert enc.get_n_binary_predicates() == 1
 
-    assert enc.get_unary_predicate_for_index(0) == "A"
+    assert enc.get_unary_predicate_for_position(0) == "A"
     assert enc.get_binary_predicate_for_colour(0) == "R"
 
 
@@ -30,7 +30,7 @@ def test_init_with_empty_predicates_adds_dummy():
     assert enc.get_n_unary_predicates() == 1
     assert enc.get_n_binary_predicates() == 1
 
-    assert enc.get_unary_predicate_for_index(0) == CanonicalEncoderDecoder.DUMMY_PRED
+    assert enc.get_unary_predicate_for_position(0) == CanonicalEncoderDecoder.DUMMY_PRED
     assert enc.get_binary_predicate_for_colour(0) == CanonicalEncoderDecoder.DUMMY_COL
 
 
@@ -47,7 +47,7 @@ def test_save_and_load(tmp_path):
 
     assert enc2.get_n_unary_predicates() == 1
     assert enc2.get_n_binary_predicates() == 1
-    assert enc2.get_unary_predicate_for_index(0) == "A"
+    assert enc2.get_unary_predicate_for_position(0) == "A"
     assert enc2.get_binary_predicate_for_colour(0) == "R"
 
 
@@ -85,7 +85,7 @@ def test_encode_dataset_unknown_unary_raises():
 
     dataset = [("a", TYPE_PRED, "UNKNOWN")]
 
-    with pytest.raises(SystemExit):
+    with pytest.raises(ValueError):
         enc.encode_dataset(dataset)
 
 
@@ -97,7 +97,7 @@ def test_encode_dataset_unknown_binary_raises():
 
     dataset = [("a", "UNKNOWN", "b")]
 
-    with pytest.raises(SystemExit):
+    with pytest.raises(ValueError):
         enc.encode_dataset(dataset)
 
 

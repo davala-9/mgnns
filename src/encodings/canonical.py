@@ -45,7 +45,7 @@ class CanonicalEncoderDecoder:
     def get_colours(self):
         return self.binary_pred_colour_dict.values()
 
-    def get_unary_predicate_for_index(self,i):
+    def get_unary_predicate_for_position(self, i):
         return self.unary_pred_position_dict.inverse[i]
 
     def get_binary_predicate_for_colour(self,i):
@@ -64,7 +64,7 @@ class CanonicalEncoderDecoder:
             for i in self.binary_pred_colour_dict.inverse:
                 output.write("{}\t{}\t{}\n".format("BINARY", i, self.binary_pred_colour_dict.inverse[i]))
 
-    # Given a (col,d)-dataset, returns its resulting (col,d)-graph
+    # Given a canonical dataset, returns its resulting (col,d)-graph
     def encode_dataset(self, dataset):
 
         delta = len(self.unary_pred_position_dict)
@@ -81,27 +81,25 @@ class CanonicalEncoderDecoder:
                 if RDF_triple[1] not in self.binary_pred_colour_dict:
                     raise ValueError(f"Predicate {RDF_triple[1]} not in the list of binary predicates recognised by this encoder.")
                 # Subscript access (not assignment) is enough to trigger the defaultdict's zero-tensor factory
-                nodename_feature_dict[RDF_triple[0]]
+                nodename_feature_dict[RDF_triple[0]] # feature is initialised only if it does not exist already
                 nodename_feature_dict[RDF_triple[2]]
                 edges.add((RDF_triple[0], RDF_triple[2], RDF_triple[1]))
 
-        features = torch.stack(list(nodename_feature_dict.values()))
+        features = torch.stack(list(nodename_feature_dict.values())) # tensor of size |nodes| x delta
         assert features.shape[1] == delta
         node_names = list(nodename_feature_dict.keys()) # Correctness of this relies on dictionaries being ordered.
+        node_to_index = {name: i for i, name in enumerate(node_names)}
         edge_list = []
         edge_colour_list = []
-        node_index = {name: i for i, name in enumerate(node_names)}
         for origin, destination, pred in edges:
-            edge_list.append([node_index[origin], node_index[destination]])
+            edge_list.append([node_to_index[origin], node_to_index[destination]])
             edge_colour_list.append(self.binary_pred_colour_dict[pred])
         edges_tensor = torch.LongTensor(edge_list).reshape(-1, 2).t().contiguous()
-        return CDGraph(col_size=col_size, delta=len(self.unary_pred_position_dict),
-                       features=features, edges=edges_tensor,
+        return CDGraph(col_size=col_size, delta=delta, features=features, edges=edges_tensor,
                        edge_colours=torch.LongTensor(edge_colour_list), node_names=node_names)
 
-    # Returns a dictionary where the keys are cd_facts and the values are their scores
+    # Decodes a (col,d)-graph into a dictionary where the keys are canonical facts and the values are their scores
     def decode_graph(self, cd_graph: CDGraph, threshold):
-
         facts_scores_dict = {}
         for i, j in torch.nonzero(cd_graph.features > threshold).tolist(): # List of matrix positions with nonzero
             facts_scores_dict[(cd_graph.node_names[i], TYPE_PRED, self.unary_pred_position_dict.inverse[j])] = (

@@ -115,7 +115,7 @@ class EquivalentProgramExtractor:
 
     def unfold_and_print_rule(self, pred_pos, compressed_rule_body, rules_for_this_predicate, output):
         rule_body = self.base_tree[pred_pos].extract_from_compact(compressed_rule_body)
-        head_can_predicate = self.internal_encoder.get_unary_predicate_for_index(pred_pos)
+        head_can_predicate = self.internal_encoder.get_unary_predicate_for_position(pred_pos)
         head_pred = self.external_encoder.unary_can_predicate_to_data_predicate(head_can_predicate)
         head_pred_arity = self.external_encoder.unary_can_predicate_to_data_predicate_arity(
             head_can_predicate)
