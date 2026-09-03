@@ -7,6 +7,9 @@ from bidict import bidict
 from src.rule_extraction.tree_shaped_conjunction import TreeShapedConjunction
 from src.utils.utils import TYPE_PRED
 
+# TODO: create accessors in TreeShapedConjunction so that this ICLR class (and other encoder/decoders) know nothing
+#  about the internal representations of TreeShapedConjunction
+
 class ICLREncoderDecoder(NonCanonicalEncoder):
 
     # Fresh predicates that correspond to colours c1, c2, c3, c4 in the paper. Abbreviations match paper names
@@ -150,8 +153,6 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
     # constant in the input data, based on the arity of the head predicate. Because of this, we can propagate this
     # information to know, for each CANONICAL variable, whether it represents also a constant pair or a single
     # constant in the input data. This halves the size of the output program.
-    # We unfold mainly canonic unary atoms, which turn into either unary or binary data atoms.
-    # Canonical binary atoms must sometimes be unfolded too.
     def unfold_all(self,can_conj: TreeShapedConjunction,internal_encoder: CanonicalEncoderDecoder,head_predicate: str):
         # This has multiple uses in the unfolding
         head_is_binary = self.data_pred_to_arity[head_predicate] == 2
