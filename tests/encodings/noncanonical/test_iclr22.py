@@ -69,6 +69,34 @@ def test_encode_dataset_use_dummy_constants_skips_pair_nodes(encoder, sample_dat
     assert dummy_pairs == {("#", "a"), ("#", "b"), ("##", "a"), ("##", "b")}
 
 
+# --- small helper methods extracted from encode/unfold logic ------------------------------------
+
+def test_pair_colour_facts(encoder):
+    facts = encoder.pair_colour_facts("a", "b", "ab", "ba")
+    assert set(facts) == {
+        ("a", encoder.col1, "ab"), ("ab", encoder.col1, "a"), ("b", encoder.col1, "ba"), ("ba", encoder.col1, "b"),
+        ("b", encoder.col2, "ab"), ("ab", encoder.col2, "b"), ("a", encoder.col2, "ba"), ("ba", encoder.col2, "a"),
+        ("ab", encoder.col3, "ba"), ("ba", encoder.col3, "ab"),
+        ("a", encoder.col4, "b"), ("b", encoder.col4, "a"),
+    }
+    assert len(facts) == 12  # no accidental duplicates
+
+
+def test_data_predicate_for_feature(encoder):
+    internal = CanonicalEncoderDecoder(
+        unary_predicates=encoder.canonical_unary_predicates,
+        binary_predicates=encoder.canonical_binary_predicates,
+    )
+    # canonical_unary_predicates = ["A", "unary-for-R"] -> positions 0, 1
+    assert encoder.data_predicate_for_feature(internal, 0) == "A"
+    assert encoder.data_predicate_for_feature(internal, 1) == "R"
+
+
+def test_make_head(encoder):
+    assert encoder.make_head(["X0"], "A", head_is_binary=False) == ("X0", TYPE_PRED, "A")
+    assert encoder.make_head(["X0", "X1"], "R", head_is_binary=True) == ("X0", "R", "X1")
+
+
 def test_decode_binary_fact(encoder):
     with pytest.raises(AssertionError):
         encoder.decode_fact("a",encoder.col1, "b")

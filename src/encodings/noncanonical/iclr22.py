@@ -69,10 +69,7 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
             ab = self.term_for_pair((a, b))
             ba = self.term_for_pair((b, a))
             encoded_dataset.append((ab, TYPE_PRED, self.data_pred_to_unary_canonical[p]))
-            encoded_dataset.extend([(a, self.col1, ab), (ab, self.col1, a), (b, self.col1, ba), (ba, self.col1, b)])
-            encoded_dataset.extend([(b, self.col2, ab), (ab, self.col2, b), (a, self.col2, ba), (ba, self.col2, a)])
-            encoded_dataset.extend([(ab, self.col3, ba), (ba, self.col3, ab)])
-            encoded_dataset.extend([(a, self.col4, b), (b, self.col4, a)])
+            encoded_dataset.extend(self.pair_colour_facts(a, b, ab, ba))
         return encoded_dataset
 
     # Returns a new dataset over the new signature
@@ -94,10 +91,7 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
                 for b in constants:
                     ab = self.term_for_pair((a, b))
                     ba = self.term_for_pair((b, a))
-                    encoded_dataset.extend([(a, self.col1, ab), (ab, self.col1, a), (b, self.col1, ba), (ba, self.col1, b)])
-                    encoded_dataset.extend([(b, self.col2, ab), (ab, self.col2, b), (a, self.col2, ba), (ba, self.col2, a)])
-                    encoded_dataset.extend([(ab, self.col3, ba), (ba, self.col3, ab)])
-                    encoded_dataset.extend([(a, self.col4, b), (b, self.col4, a)])
+                    encoded_dataset.extend(self.pair_colour_facts(a, b, ab, ba))
 
         return encoded_dataset
 
@@ -133,6 +127,24 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
     def is_can_const_for_pair(self, const):
         return const in self.pair_term_dict.inverse
 
+    # Translates a set feature (position in a canonical variable's unary bitset) into its data predicate.
+    def data_predicate_for_feature(self, internal_encoder, feat):
+        can_predicate = internal_encoder.unary_pred_position_dict.inverse[feat]
+        return self.data_pred_to_unary_canonical.inverse[can_predicate]
+
+    # All colour facts the encoding adds for a pair (a,b), given the (already created) terms for (a,b) and (b,a).
+    def pair_colour_facts(self, a, b, ab, ba):
+        return [(a, self.col1, ab), (ab, self.col1, a), (b, self.col1, ba), (ba, self.col1, b),
+                (b, self.col2, ab), (ab, self.col2, b), (a, self.col2, ba), (ba, self.col2, a),
+                (ab, self.col3, ba), (ba, self.col3, ab),
+                (a, self.col4, b), (b, self.col4, a)]
+
+    # Builds the rule head tuple, in either binary or unary (type-fact) shape.
+    def make_head(self, root_variables, head_predicate, head_is_binary):
+        if head_is_binary:
+            return root_variables[0], head_predicate, root_variables[1]
+        return root_variables[0], TYPE_PRED, head_predicate
+
     # We traverse the canonical conjunction, unfolding as we go.
     # We use a slight optimisation: we KNOW whether the head variable represents a constant pair or a single
     # constant in the input data, based on the arity of the head predicate. Because of this, we can propagate this
@@ -142,8 +154,7 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
     # Canonical binary atoms must sometimes be unfolded too.
     def unfold_all(self,can_conj: TreeShapedConjunction,internal_encoder: CanonicalEncoderDecoder,head_predicate: str):
         # This has multiple uses in the unfolding
-        head_predicate_arity = self.data_pred_to_arity[head_predicate]
-        head_is_binary = head_predicate_arity == 2
+        head_is_binary = self.data_pred_to_arity[head_predicate] == 2
 
         # Variable manager
         data_var_prefix = "X"  # Variables in the unfolded conjunction are of the form Xn, for n a number
@@ -182,8 +193,7 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
             new_data_conjs = []
             if can_conj.features[var_id].elements():
                 for feat in can_conj.features[var_id].elements():
-                    can_predicate = internal_encoder.unary_pred_position_dict.inverse[feat]
-                    data_predicate = self.data_pred_to_unary_canonical.inverse[can_predicate]
+                    data_predicate = self.data_predicate_for_feature(internal_encoder, feat)
                     data_conj.append((first_data_var, data_predicate, second_data_var))
                 new_data_conjs.append(data_conj)
             else:  # If there's no RELEVANT binary predicate, we must add all binary predicates as per the encoding
@@ -218,8 +228,7 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
         def unfold_variable_for_single(data_conj, var_id: int, data_var: str):
             # First, extend conjunction with the relevant unary atoms.
             for feat in can_conj.features[var_id].elements():
-                can_predicate = internal_encoder.unary_pred_position_dict.inverse[feat]
-                data_predicate = self.data_pred_to_unary_canonical.inverse[can_predicate]
+                data_predicate = self.data_predicate_for_feature(internal_encoder, feat)
                 data_conj.append((data_var, TYPE_PRED, data_predicate))
 
             # Next, unfold children
@@ -257,10 +266,7 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
             data_conjs = unfold_variable_for_single(data_conj=[], var_id=0,data_var=root_variables[0])
         data_conjs = [list(dict.fromkeys(dc)) for dc in data_conjs]  # Remove potential duplicates
 
-        if head_is_binary:
-            head = (root_variables[0], head_predicate, root_variables[1])
-        else:
-            head = (root_variables[0], TYPE_PRED, head_predicate)
+        head = self.make_head(root_variables, head_predicate, head_is_binary)
 
         return data_conjs, head
 
@@ -275,8 +281,7 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
         data_conj = [] # The output conjunction. List, not a TreeLikeConj, because unfolding might break the tree struct
 
         # This has multiple uses in the unfolding
-        head_predicate_arity = self.data_pred_to_arity[head_predicate]
-        head_is_binary = head_predicate_arity == 2
+        head_is_binary = self.data_pred_to_arity[head_predicate] == 2
 
         # Map from canonical variables to the indices of the graph nodes they represent
         can_var_to_can_const_idx = grounding_context.canonical_variable_to_constant_index
@@ -322,8 +327,7 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
                 second_data_var = new_variable()
                 data_var_to_data_const[second_data_var] = get_data_constants_for_can_variable(var_id)[1]
             for feat in can_conj.features[var_id].elements():
-                can_predicate = internal_encoder.unary_pred_position_dict.inverse[feat]
-                data_predicate = self.data_pred_to_unary_canonical.inverse[can_predicate]
+                data_predicate = self.data_predicate_for_feature(internal_encoder, feat)
                 data_conj.append((first_data_var, data_predicate, second_data_var))
             if not can_conj.features[var_id].elements(): # If there's no RELEVANT binary predicate, just add the TOP one
                 data_conj.append((first_data_var, self.TOP_PREDICATE, second_data_var))
@@ -348,8 +352,7 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
         def unfold_variable_for_single(var_id, data_var: str):
             # First, add the relevant atoms.
             for feat in can_conj.features[var_id].elements():
-                can_predicate = internal_encoder.unary_pred_position_dict.inverse[feat]
-                data_predicate = self.data_pred_to_unary_canonical.inverse[can_predicate]
+                data_predicate = self.data_predicate_for_feature(internal_encoder, feat)
                 data_conj.append((data_var, TYPE_PRED, data_predicate))
             # Next, unfold children
             # Here, for children via c1 and c2, we don't need to worry about unfolding the edge because it will be
@@ -380,6 +383,17 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
 
         data_conj = list(dict.fromkeys(data_conj)) # Remove potential duplicates
 
+        # Looks up the data predicate holding between x and y in the grounding graph, or None if there isn't one.
+        def data_predicate_between(x_const, y_const):
+            assert (x_const, y_const) in self.pair_term_dict # the term for this pair must already exist
+            t = self.term_for_pair((x_const, y_const))
+            nz = torch.nonzero(
+                grounding_context.graph.features[grounding_context.graph.node_names_to_indices[t]]).flatten()
+            if not len(nz):
+                return None
+            can_predicate = internal_encoder.unary_pred_position_dict.inverse[nz[0].item()]
+            return self.data_pred_to_unary_canonical.inverse[can_predicate]
+
         # Process TOP predicate facts
         already_grounded_pairs = set() # Note variables that already appear together in a fact of the rule
         for s, p, o in data_conj:
@@ -393,28 +407,15 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
                 if frozenset((s,o)) not in already_grounded_pairs:
                     a = data_var_to_data_const[s]
                     b = data_var_to_data_const[o]
-                    assert (a,b) in self.pair_term_dict # both this and the term for b a must exist
-                    t = self.term_for_pair((a, b))
-                    nz = torch.nonzero(
-                        grounding_context.graph.features[grounding_context.graph.node_names_to_indices[t]]).flatten()
-                    if len(nz):
-                        can_pred_idx = nz[0].item()
-                        can_predicate = internal_encoder.unary_pred_position_dict.inverse[can_pred_idx]
-                        new_data_conj.append((s, self.data_pred_to_unary_canonical.inverse[can_predicate], o))
+                    data_predicate = data_predicate_between(a, b)
+                    if data_predicate is not None:
+                        new_data_conj.append((s, data_predicate, o))
                     else:
-                        assert (b, a) in self.pair_term_dict
-                        t = self.term_for_pair((b, a))
-                        nz = torch.nonzero(
-                            grounding_context.graph.features[grounding_context.graph.node_names_to_indices[t]]).flatten()
-                        assert len(nz) # if the feature of t-a-b was all 0, then that of t-b-a must have a 1
-                        can_pred_idx = nz[0].item()
-                        can_predicate = internal_encoder.unary_pred_position_dict.inverse[can_pred_idx]
-                        new_data_conj.append((o, self.data_pred_to_unary_canonical.inverse[can_predicate], s))
+                        data_predicate = data_predicate_between(b, a)
+                        assert data_predicate is not None # if a-b had no feature set, b-a must
+                        new_data_conj.append((o, data_predicate, s))
                     already_grounded_pairs.add(frozenset((s,o)))
 
-        if head_is_binary:
-            head = (root_variables[0], head_predicate, root_variables[1])
-        else:
-            head = (root_variables[0], TYPE_PRED, head_predicate)
+        head = self.make_head(root_variables, head_predicate, head_is_binary)
 
         return new_data_conj, head
