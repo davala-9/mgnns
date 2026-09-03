@@ -42,7 +42,7 @@ class TreeShapedConjunction:
         self.parent_edge = [None,] # Auxiliary mapping from a node to its incoming edge
         for var_id in range(1,len(self)):
             par_id = self.parent[var_id]
-            for edge, child_id  in self.children[par_id]:
+            for edge, child_id  in self.children[par_id].items():
                 if child_id == var_id:
                    self.parent_edge.append(edge)
                    continue

@@ -7,8 +7,7 @@ from src.encodings.canonical import CanonicalEncoderDecoder
 from src.encodings.noncanonical.iclr22 import ICLREncoderDecoder
 from src.encodings.noncanonical.noncanonical import GroundContext
 from src.model.cd_graph import CDGraph
-from src.rule_extraction.fact_explanation import FactExplainer
-from src.rule_extraction.tree_shaped_conjunction import Variable, TreeShapedConjunction
+from src.rule_extraction.tree_shaped_conjunction import TreeShapedConjunctionBuilder
 from src.utils.utils import TYPE_PRED
 from src.utils.bitset import BitSet
 
@@ -27,12 +26,12 @@ def sample_dataset():
 def test_initialisation(encoder):
 
     # Test internal fields
-    assert encoder.input_predicate_to_unary_canonical_dict["A"] == "A"
-    assert encoder.input_predicate_to_unary_canonical_dict.inverse["A"] == "A"
-    assert encoder.input_predicate_to_unary_canonical_dict["R"] == "unary-for-R"
-    assert encoder.input_predicate_to_unary_canonical_dict.inverse["unary-for-R"] == "R"
-    assert encoder.input_predicate_to_arity["A"] == 1
-    assert encoder.input_predicate_to_arity["R"] == 2
+    assert encoder.data_pred_to_unary_canonical["A"] == "A"
+    assert encoder.data_pred_to_unary_canonical.inverse["A"] == "A"
+    assert encoder.data_pred_to_unary_canonical["R"] == "unary-for-R"
+    assert encoder.data_pred_to_unary_canonical.inverse["unary-for-R"] == "R"
+    assert encoder.data_pred_to_arity["A"] == 1
+    assert encoder.data_pred_to_arity["R"] == 2
     assert encoder.canonical_unary_predicates == ["A","unary-for-R"]
     assert encoder.canonical_binary_predicates == [encoder.col1, encoder.col2, encoder.col3, encoder.col4]
 
@@ -62,6 +61,14 @@ def test_encode_dataset(encoder,sample_dataset):
     assert ("a", encoder.col4, "b") in cd_dataset
 
 
+def test_encode_dataset_use_dummy_constants_skips_pair_nodes(encoder, sample_dataset):
+    # Dummy constants ('#', '##') must only be paired with genuine data constants ("a", "b"),
+    # never with the synthetic pair-term nodes ("term-for-a-b", ...) created by the encoding itself.
+    encoder.encode_dataset(sample_dataset, use_dummy_constants=True)
+    dummy_pairs = {pair for pair in encoder.pair_term_dict if pair[0] in ("#", "##")}
+    assert dummy_pairs == {("#", "a"), ("#", "b"), ("##", "a"), ("##", "b")}
+
+
 def test_decode_binary_fact(encoder):
     with pytest.raises(AssertionError):
         encoder.decode_fact("a",encoder.col1, "b")
@@ -71,6 +78,18 @@ def test_decode_unary_facts(encoder,sample_dataset):
     encoder.encode_dataset(sample_dataset) # Necessary to create the relevant terms
     assert ("a",TYPE_PRED,"A") == encoder.decode_fact("a",TYPE_PRED,"A")
     assert ("a","R","b") == encoder.decode_fact("term-for-a-b",TYPE_PRED,"unary-for-R")
+
+def test_decode_fact_pair_node_with_unary_arity_predicate_is_filtered(encoder, sample_dataset):
+    # "A" is a unary-arity data predicate; predicting it on a node that represents a pair is
+    # an invalid/spurious combination and must be filtered out (returns None), not decoded.
+    encoder.encode_dataset(sample_dataset)  # registers "term-for-a-b"
+    assert encoder.decode_fact("term-for-a-b", TYPE_PRED, "A") is None
+
+def test_decode_fact_single_constant_with_binary_arity_predicate_is_filtered(encoder, sample_dataset):
+    # "unary-for-R" has data-arity 2; predicting it on a plain constant node is the symmetric
+    # invalid combination and must be filtered out (returns None) as well.
+    encoder.encode_dataset(sample_dataset)
+    assert encoder.decode_fact("a", TYPE_PRED, "unary-for-R") is None
 
 def test_decoder_dataset(encoder,sample_dataset):
     encoder.encode_dataset(sample_dataset) # Necessary to create the relevant terms
@@ -107,158 +126,183 @@ def test_save_to_file(encoder):
 
     os.remove(file_path)
 
-def test_unfold_unary_head():
-    external = ICLREncoderDecoder(
-        unary_predicates=["A","B"],
-        binary_predicates=["R","S"]
-    )
-    external.pair_term_dict[("a","b")] = "term-for-a-b"
-    external.pair_term_dict[("b","a")] = "term-for-b-a"
-    external.pair_term_dict[("d","a")] = "term-for-d-a"
-    external.pair_term_dict[("a","c")] = "term-for-a-c" # this one MUST exist if a and c are connected via c4
 
+# --- unfold_match_ground -----------------------------------------------------------------------
+# can_conj trees below are built directly with TreeShapedConjunctionBuilder (var ids are plain
+# ints indexing parallel features/children/parent tuples), matching the current TreeShapedConjunction
+# API. Edge keys are (level, colour, position) tuples; only the colour (middle element) matters
+# to the unfolding logic.
+
+def test_unfold_match_ground_unary_head_no_children():
+    external = ICLREncoderDecoder(unary_predicates=["A"], binary_predicates=["R"])
     internal = CanonicalEncoderDecoder(
         unary_predicates=external.canonical_unary_predicates,
-        binary_predicates=external.canonical_binary_predicates
+        binary_predicates=external.canonical_binary_predicates,
     )
-    # Simple treelike conjunction with 4 variables
-    feature_mask_a = BitSet.from_subset(dimension=4,subset={0,1})
-    variable_a = Variable(feature_mask_a,level=2) # Represents constant a
 
-    feature_mask_b = BitSet.from_subset(dimension=4,subset={2,3})
-    variable_b = Variable(feature_mask_b,level=1) # Represents constant ab
+    builder = TreeShapedConjunctionBuilder(n_colours=4)
+    builder.add(features=BitSet.from_subset(2, {0}), level=0, parent=-1)  # single "a": A(a)
+    conj = builder.build()
 
-    feature_mask_c = BitSet.from_subset(dimension=4,subset={3})
-    variable_c = Variable(feature_mask_c,level=0) # Represents constant ba
+    cd_graph = CDGraph(col_size=4, delta=2, features=torch.zeros(1, 2),
+                       edges=torch.zeros(2, 0, dtype=torch.long), edge_colours=torch.zeros(0, dtype=torch.long),
+                       node_names=["a"])
+    ground = GroundContext(fact=("a", TYPE_PRED, "A"), graph=cd_graph, canonical_variable_to_constant_index={0: 0})
 
-    feature_mask_d = BitSet.from_subset(dimension=4,subset={1})
-    variable_d = Variable(feature_mask_d,level=0) # Represents constant c
+    data_conj, head = external.unfold_match_ground(can_conj=conj, internal_encoder=internal,
+                                                    head_predicate="A", grounding_context=ground)
 
-    feature_mask_e = BitSet.from_subset(dimension=4,subset={2})
-    variable_e = Variable(feature_mask_e,level=0) # Represents constant da
-
-    variable_a.children[(1,0,0)] = variable_b # layer 1, colour 1, position 1 (the position does not matter)
-    variable_b.children[(0,2,3)] = variable_c # layer 0, colour 3, position 4
-    variable_a.children[(0,3,1)] = variable_d # layer 0, colour 4, position 2
-    variable_a.children[(0,1,2)] = variable_e # layer 0, colour 2, position 3
-    conj = TreeShapedConjunction(variable_a,2)
-
-    var_const_idx = {variable_a: 0, variable_b: 1, variable_c: 2, variable_d: 3, variable_e: 4}
-    # More edges and nodes should exist, but we dont include them because they are unnecessary for the test
-    cd_graph = CDGraph(col_size = 1,delta=1,features=torch.ones(6,1),edges=torch.zeros(2,1),
-                       edge_colours=torch.zeros(1,1), node_names = ["a",
-                                                                    "term-for-a-b",
-                                                                    "term-for-b-a",
-                                                                    "c",
-                                                                    "term-for-d-a",
-                                                                    "term-for-a-c"])
-    ground_data = GroundContext(["a",TYPE_PRED,"A"],cd_graph,var_const_idx)
-    data_conj, head = external.unfold_match_ground(can_conj=conj,
-                                                   internal_encoder=internal,
-                                                   head_predicate="A",
-                                                   grounding_context=ground_data)
-
-    # Validate root variable
     assert head == ("X0", TYPE_PRED, "A")
-    # Expected facts:
-    # Unfolding happens in a depth-first way, which tells us the order of the variables
-    # a->b->c->d->e
-    assert ("X0", TYPE_PRED, "A") in data_conj
-    assert ("X0", TYPE_PRED, "B") in data_conj # from features in variable a
-    assert ("X0", "R", "X1") in data_conj
-    assert ("X0", "S", "X1") in data_conj # from features in variable b
-    assert ("X1", "S", "X0") in data_conj # from features in variable c
-    assert ("X2", TYPE_PRED, "B") in data_conj # from features in variable d
-    assert ("X3", "R", "X0") in data_conj # from features in variable e
+    assert set(data_conj) == {("X0", TYPE_PRED, "A")}
 
 
-def test_unfold_binary_head():
-    external = ICLREncoderDecoder(
-        unary_predicates=["A", "B"],
-        binary_predicates=["R", "S"]
-    )
-    external.pair_term_dict[("a", "b")] = "term-for-a-b"
-    external.pair_term_dict[("c", "a")] = "term-for-c-a"
-    external.pair_term_dict[("b", "a")] = "term-for-b-a"
-    external.pair_term_dict[("a", "d")] = "term-for-a-d"  # this one MUST exist if a and d are connected via c4
+def test_unfold_match_ground_binary_head_with_col3_reversal():
+    external = ICLREncoderDecoder(unary_predicates=["A"], binary_predicates=["R", "S"])
+    external.term_for_pair(("a", "b"))
+    external.term_for_pair(("b", "a"))
     internal = CanonicalEncoderDecoder(
         unary_predicates=external.canonical_unary_predicates,
-        binary_predicates=external.canonical_binary_predicates
+        binary_predicates=external.canonical_binary_predicates,
     )
-    # Simple treelike conjunction with 4 variables
-    feature_mask_a = BitSet.from_subset(dimension=4, subset={2, 3})
-    variable_a = Variable(feature_mask_a, level=2)  # Represents constant ab, facts R(a,b) S(a,b)
+    # canonical_unary_predicates = ["A", "unary-for-R", "unary-for-S"] -> A=0, unary-for-R=1, unary-for-S=2
+    # canonical_binary_predicates = [col1, col2, col3, col4]           -> col3=2
 
-    feature_mask_b = BitSet.from_subset(dimension=4, subset={0})
-    variable_b = Variable(feature_mask_b, level=1)  # Represents constant a, fact A(a)
+    builder = TreeShapedConjunctionBuilder(n_colours=4)
+    root = builder.add(features=BitSet.from_subset(3, {2}), level=1, parent=-1)             # pair (a,b): S(a,b)
+    builder.add(features=BitSet.from_subset(3, {1}), level=0, parent=root, edge=(1, 2, 0))  # col3 -> pair (b,a): R(b,a)
+    conj = builder.build()
 
-    feature_mask_c = BitSet.from_subset(dimension=4, subset={3})
-    variable_c = Variable(feature_mask_c, level=0)  # Represents constant ca, fact S(c,a)
+    node_names = ["term-for-a-b", "term-for-b-a"]
+    cd_graph = CDGraph(col_size=4, delta=3, features=torch.zeros(2, 3),
+                       edges=torch.zeros(2, 0, dtype=torch.long), edge_colours=torch.zeros(0, dtype=torch.long),
+                       node_names=node_names)
+    ground = GroundContext(fact=("a", "R", "b"), graph=cd_graph,
+                           canonical_variable_to_constant_index={0: 0, 1: 1})
 
-    feature_mask_d = BitSet.from_subset(dimension=4, subset={2})
-    variable_d = Variable(feature_mask_d, level=0)  # Represents constant ba, fact R(b,a)
+    data_conj, head = external.unfold_match_ground(can_conj=conj, internal_encoder=internal,
+                                                    head_predicate="R", grounding_context=ground)
 
-    feature_mask_e = BitSet.from_subset(dimension=4, subset={1})
-    variable_e = Variable(feature_mask_e, level=0)  # Represents constant d, fact B(d)
-
-    variable_a.children[(1, 0, 0)] = variable_b  # layer 1, colour 1, position 1 (the position does not matter)
-    variable_b.children[(0, 1, 3)] = variable_c  # layer 0, colour 2, position 4
-    variable_a.children[(0, 2, 2)] = variable_d  # layer 0, colour 3, position 3
-    variable_b.children[(0, 3, 1)] = variable_e  # layer 0, colour 4, position 2
-    conj = TreeShapedConjunction(variable_a,2)
-
-
-    # Unfolding happens in a depth-first way, which tells us the order of the variables: a->b->c->e->d
-    var_const_idx = {variable_a: 0, variable_b: 1, variable_c: 2, variable_e: 3, variable_d: 4}
-    # More edges, nodes and 1 features should exist, but we dont include them because they are unnecessary for the test
-    cd_graph = CDGraph(col_size=1, delta=4, features=torch.tensor([[0,0,0,0],
-                                                                   [0,0,0,0],
-                                                                   [0,0,0,0],
-                                                                   [0,0,0,0],
-                                                                   [0,0,0,0],
-                                                                   [0,0,1,0]]),
-                       edges=torch.zeros(2,1),
-                       edge_colours=torch.zeros(1, 1),
-                       node_names=["term-for-a-b", "a", "term-for-c-a", "d", "term-for-b-a", "term-for-a-d"])
-
-    ground_data = GroundContext(["a","R", "b"], cd_graph, var_const_idx)
-    data_conj, head = external.unfold_match_ground(can_conj=conj,
-                                                   internal_encoder=internal,
-                                                   head_predicate="R",
-                                                   grounding_context=ground_data)
-
-    # Validate head
     assert head == ("X0", "R", "X1")
+    assert set(data_conj) == {
+        ("X0", "S", "X1"),  # from the root pair's own feature
+        ("X1", "R", "X0"),  # from the col3-reversed child
+    }
 
-    # Expected facts:
-    assert ("X0", "R", "X1") in data_conj
-    assert ("X0", "S", "X1") in data_conj # from features in variable a
-    assert("X0", TYPE_PRED, "A") in data_conj # from features in variable b
-    assert ("X2", "S", "X0") in data_conj # from features in variable c
-    assert ("X0", "R", "X3") in data_conj # this is how we ground the top-pred
-    assert ("X3", TYPE_PRED, "B") in data_conj # from features in variable e
-    assert ("X1", "R", "X0") in data_conj # from features in variable d
 
-def test_unfold_empty():
-    external = ICLREncoderDecoder( unary_predicates=["A"], binary_predicates=["R"] )
-    external.pair_term_dict[("a", "b")] = "term-for-a-b"
+def test_unfold_match_ground_col4_backfill_preserves_multichar_constants():
+    # Regression test: get_data_constants_for_can_variable used to do list(canonical_constant),
+    # which silently chopped a multi-character constant name down to its first letter.
+    external = ICLREncoderDecoder(unary_predicates=["A"], binary_predicates=["R"])
+    external.term_for_pair(("alice", "bob"))
+    external.term_for_pair(("bob", "alice"))
     internal = CanonicalEncoderDecoder(
         unary_predicates=external.canonical_unary_predicates,
-        binary_predicates=external.canonical_binary_predicates
+        binary_predicates=external.canonical_binary_predicates,
     )
-    feature_mask_a = BitSet.from_subset(dimension=2, subset=set())
-    variable_a = Variable(feature_mask_a, level=2)
-    conj = TreeShapedConjunction(variable_a,1)
-    var_const_idx = {variable_a: 0}
-    # More edges, nodes and 1 features should exist, but we dont include them because they are unnecessary for the test
-    cd_graph = CDGraph(col_size=1, delta=2, features=torch.tensor([[0, 1]]), edges=torch.zeros(2,1),
-                       edge_colours=torch.zeros(1, 1), node_names=["term-for-a-b"])
+    # canonical_unary_predicates = ["A", "unary-for-R"] -> A=0, unary-for-R=1
+    # canonical_binary_predicates = [col1, col2, col3, col4] -> col4=3
 
-    ground_data = GroundContext(["a", "R", "b"], cd_graph, var_const_idx)
-    data_conj, head = external.unfold_match_ground(can_conj=conj,
-                                                   internal_encoder=internal,
-                                                   head_predicate="R",
-                                                   grounding_context=ground_data)
+    builder = TreeShapedConjunctionBuilder(n_colours=4)
+    root = builder.add(features=BitSet.from_subset(2, {0}), level=1, parent=-1)             # alice: A(alice)
+    builder.add(features=BitSet.from_subset(2, {0}), level=0, parent=root, edge=(1, 3, 0))  # col4 -> bob: A(bob)
+    conj = builder.build()
+
+    node_names = ["alice", "bob", "term-for-alice-bob"]
+    features = torch.tensor([[0., 0.], [0., 0.], [0., 1.]])  # the alice-bob pair holds canonical "unary-for-R"
+    cd_graph = CDGraph(col_size=4, delta=2, features=features,
+                       edges=torch.zeros(2, 0, dtype=torch.long), edge_colours=torch.zeros(0, dtype=torch.long),
+                       node_names=node_names)
+    ground = GroundContext(fact=("alice", TYPE_PRED, "A"), graph=cd_graph,
+                           canonical_variable_to_constant_index={0: 0, 1: 1})
+
+    data_conj, head = external.unfold_match_ground(can_conj=conj, internal_encoder=internal,
+                                                    head_predicate="A", grounding_context=ground)
+
+    assert head == ("X0", TYPE_PRED, "A")
+    # The col4 edge must be backfilled with the real relation between "alice" and "bob" in full,
+    # not between truncated single-character stand-ins.
+    assert set(data_conj) == {
+        ("X0", TYPE_PRED, "A"),
+        ("X1", TYPE_PRED, "A"),
+        ("X0", "R", "X1"),
+    }
+
+
+# --- unfold_all ----------------------------------------------------------------------------
+# unfold_all had no prior test coverage at all. These target the bugs fixed in it: the col3
+# branch silently dropping its recursive result, the col4 branch crashing (unhashable list in
+# a set), the empty-feature branch never triggering, and duplicate atoms not being removed.
+
+def test_unfold_all_empty_feature_branching_and_dedup():
+    external = ICLREncoderDecoder(unary_predicates=["A"], binary_predicates=["R"])
+    internal = CanonicalEncoderDecoder(
+        unary_predicates=external.canonical_unary_predicates,
+        binary_predicates=external.canonical_binary_predicates,
+    )
+    # canonical_unary_predicates = ["A", "unary-for-R"] -> A=0
+    # canonical_binary_predicates = [col1, col2, col3, col4] -> col1=0
+
+    builder = TreeShapedConjunctionBuilder(n_colours=4)
+    var0 = builder.add(features=BitSet.from_subset(2, {0}), level=2, parent=-1)                      # single "a": A(a)
+    var1 = builder.add(features=BitSet.from_subset(2, set()), level=1, parent=var0, edge=(2, 0, 0))  # col1 -> pair, no relevant predicate
+    builder.add(features=BitSet.from_subset(2, {0}), level=0, parent=var1, edge=(1, 0, 0))           # col1 -> single "a" again: A(a)
+    conj = builder.build()
+
+    data_conjs, head = external.unfold_all(can_conj=conj, internal_encoder=internal, head_predicate="A")
+
+    assert head == ("X0", TYPE_PRED, "A")
+    # With no relevant feature on the pair node, unfolding must branch over every binary predicate
+    # in both directions (there's only one predicate here, "R", so exactly 2 alternative bodies).
+    assert len(data_conjs) == 2
+    bodies = [frozenset(dc) for dc in data_conjs]
+    assert frozenset({("X0", TYPE_PRED, "A"), ("X0", "R", "X1")}) in bodies
+    assert frozenset({("X0", TYPE_PRED, "A"), ("X1", "R", "X0")}) in bodies
+    # The revisited single variable re-asserts the same unary atom; it must be deduplicated.
+    for dc in data_conjs:
+        assert len(dc) == len(set(dc))
+
+
+def test_unfold_all_col3_branch_is_preserved():
+    external = ICLREncoderDecoder(unary_predicates=["A"], binary_predicates=["R"])
+    internal = CanonicalEncoderDecoder(
+        unary_predicates=external.canonical_unary_predicates,
+        binary_predicates=external.canonical_binary_predicates,
+    )
+    # canonical_unary_predicates = ["A", "unary-for-R"] -> unary-for-R=1
+    # canonical_binary_predicates = [col1, col2, col3, col4] -> col3=2
+
+    builder = TreeShapedConjunctionBuilder(n_colours=4)
+    var0 = builder.add(features=BitSet.from_subset(2, {1}), level=1, parent=-1)             # pair (a,b): R(a,b)
+    builder.add(features=BitSet.from_subset(2, {1}), level=0, parent=var0, edge=(1, 2, 0))  # col3 -> pair (b,a): R(b,a)
+    conj = builder.build()
+
+    data_conjs, head = external.unfold_all(can_conj=conj, internal_encoder=internal, head_predicate="R")
+
     assert head == ("X0", "R", "X1")
-    # Expected fact
-    assert ("X0", "R", "X1") in data_conj
+    # A col3 child must not be dropped: this used to silently return no rule bodies at all.
+    assert len(data_conjs) == 1
+    assert set(data_conjs[0]) == {("X0", "R", "X1"), ("X1", "R", "X0")}
+
+
+def test_unfold_all_col4_branches_over_binary_predicates():
+    external = ICLREncoderDecoder(unary_predicates=["A"], binary_predicates=["R"])
+    internal = CanonicalEncoderDecoder(
+        unary_predicates=external.canonical_unary_predicates,
+        binary_predicates=external.canonical_binary_predicates,
+    )
+    # canonical_binary_predicates = [col1, col2, col3, col4] -> col4=3
+
+    builder = TreeShapedConjunctionBuilder(n_colours=4)
+    var0 = builder.add(features=BitSet.from_subset(2, {0}), level=1, parent=-1)             # single "a": A(a)
+    builder.add(features=BitSet.from_subset(2, {0}), level=0, parent=var0, edge=(1, 3, 0))  # col4 -> single "b": A(b)
+    conj = builder.build()
+
+    data_conjs, head = external.unfold_all(can_conj=conj, internal_encoder=internal, head_predicate="A")
+
+    assert head == ("X0", TYPE_PRED, "A")
+    # A col4 child has no fixed direction/predicate, so unfolding must branch over every option
+    # (this used to crash trying to put a list into a set).
+    assert len(data_conjs) == 2
+    bodies = [frozenset(dc) for dc in data_conjs]
+    assert frozenset({("X0", TYPE_PRED, "A"), ("X1", TYPE_PRED, "A"), ("X0", "R", "X1")}) in bodies
+    assert frozenset({("X0", TYPE_PRED, "A"), ("X1", TYPE_PRED, "A"), ("X1", "R", "X0")}) in bodies

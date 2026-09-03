@@ -7,7 +7,7 @@ from src.encodings.canonical import CanonicalEncoderDecoder
 from src.encodings.noncanonical.identity import IdentityEncoderDecoder
 from src.encodings.noncanonical.noncanonical import GroundContext
 from src.model.cd_graph import CDGraph
-from src.rule_extraction.tree_shaped_conjunction import Variable, TreeShapedConjunction
+from src.rule_extraction.tree_shaped_conjunction import TreeShapedConjunctionBuilder
 from src.utils.utils import TYPE_PRED
 from src.utils.bitset import BitSet
 
@@ -43,6 +43,14 @@ def test_get_canonical_equivalent_identity():
     fact = ("s", "p", "o")
 
     assert encoder.get_canonical_equivalent(fact) == fact
+
+
+def test_init_rejects_overlapping_predicates():
+    try:
+        IdentityEncoderDecoder(unary_predicates=["A"], binary_predicates=["A"])
+        assert False, "expected an AssertionError for overlapping unary/binary predicates"
+    except AssertionError:
+        pass
 
 
 # ------------------------
@@ -84,6 +92,14 @@ def test_save_to_file():
     os.remove(file_path)
 
 
+# ------------------------
+# unfold_all / unfold_match_ground
+# ------------------------
+# can_conj trees below are built directly with TreeShapedConjunctionBuilder (var ids are plain
+# ints indexing parallel features/children/parent tuples), matching the current TreeShapedConjunction
+# API. Edge keys are (level, colour, position) tuples; only the colour (middle element) matters
+# to the unfolding logic.
+
 def test_unfold_simple_tree():
     external = IdentityEncoderDecoder(
         unary_predicates=["A", "B"],
@@ -91,29 +107,23 @@ def test_unfold_simple_tree():
     )
     internal = CanonicalEncoderDecoder(
         unary_predicates=["A", "B"],
-        binary_predicates=["R","S"]
+        binary_predicates=["R", "S"]
     )
+    # internal: unary A=0, B=1 ; binary R=0, S=1
 
-    # Simple treelike conjunction with 4 variables
-    feature_mask_a = BitSet.from_subset(dimension=2,subset=set())
-    feature_mask_b = BitSet.from_subset(dimension=2,subset={0})
-    feature_mask_c = BitSet.from_subset(dimension=2,subset={0,1})
-    feature_mask_d = BitSet.from_subset(dimension=2,subset={1})
-    variable_a = Variable(feature_mask_a,level=2)
-    variable_b = Variable(feature_mask_b,level=0)
-    variable_c = Variable(feature_mask_c,level=1)
-    variable_d = Variable(feature_mask_d,level=0)
-    variable_a.children[(0,0,0)] = variable_b
-    variable_a.children[(1,1,1)] = variable_c
-    variable_c.children[(0,0,1)] = variable_d
-    conj = TreeShapedConjunction(variable_a,2)
+    builder = TreeShapedConjunctionBuilder(n_colours=2)
+    var_a = builder.add(features=BitSet.from_subset(2, set()), level=2, parent=-1)                  # root "a": no features
+    var_b = builder.add(features=BitSet.from_subset(2, {0}), level=0, parent=var_a, edge=(0, 0, 0))  # colour0=R -> "b": A(b)
+    var_c = builder.add(features=BitSet.from_subset(2, {0, 1}), level=1, parent=var_a, edge=(1, 1, 1))  # colour1=S -> "c": A(c), B(c)
+    builder.add(features=BitSet.from_subset(2, {1}), level=0, parent=var_c, edge=(0, 0, 1))          # colour0=R -> "d": B(d)
+    conj = builder.build()
 
-
-    ground_data = GroundContext(["a",TYPE_PRED,"A"], DUMMY_GRAPH, EMPTY_DICT) # dummy data
+    ground_data = GroundContext(fact=("a", TYPE_PRED, "A"), graph=DUMMY_GRAPH,
+                                canonical_variable_to_constant_index=EMPTY_DICT)  # dummy data, ignored
     data_conj, head = external.unfold_match_ground(can_conj=conj,
-                                                        internal_encoder=internal,
-                                                        head_predicate="A",
-                                                        grounding_context=ground_data)
+                                                    internal_encoder=internal,
+                                                    head_predicate="A",
+                                                    grounding_context=ground_data)
 
     # Validate head
     assert head == ("X0", TYPE_PRED, "A")
@@ -128,6 +138,7 @@ def test_unfold_simple_tree():
     assert ("X2", TYPE_PRED, "B") in data_conj
     assert ("X3", "R", "X2") in data_conj
     assert ("X3", TYPE_PRED, "B") in data_conj
+    assert len(data_conj) == 7
 
 
 def test_unfold_empty():
@@ -136,14 +147,17 @@ def test_unfold_empty():
         unary_predicates=["A"],
         binary_predicates=["R"]
     )
-    feature_mask_a = BitSet.from_subset(dimension=1,subset=set())
-    variable_a = Variable(feature_mask_a,2)
-    conj = TreeShapedConjunction(variable_a,1)
 
-    ground_data = GroundContext(["a","R","b"], DUMMY_GRAPH, EMPTY_DICT) # dummy data
+    builder = TreeShapedConjunctionBuilder(n_colours=1)
+    builder.add(features=BitSet.from_subset(1, set()), level=2, parent=-1)  # single node, no features, no children
+    conj = builder.build()
+
+    ground_data = GroundContext(fact=("a", "R", "b"), graph=DUMMY_GRAPH,
+                                canonical_variable_to_constant_index=EMPTY_DICT)  # dummy data, ignored
     rule, head = encoder.unfold_match_ground(can_conj=conj,
                                               internal_encoder=internal,
                                               head_predicate="R",
                                               grounding_context=ground_data)
 
     assert rule == []
+    assert head == ("X0", TYPE_PRED, "R")

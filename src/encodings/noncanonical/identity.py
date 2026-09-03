@@ -1,6 +1,6 @@
 from src.encodings.canonical import CanonicalEncoderDecoder
 from src.encodings.noncanonical.noncanonical import NonCanonicalEncoder, GroundContext
-from src.rule_extraction.tree_shaped_conjunction import TreeShapedConjunction, Variable
+from src.rule_extraction.tree_shaped_conjunction import TreeShapedConjunction
 from src.utils.utils import TYPE_PRED
 
 class IdentityEncoderDecoder(NonCanonicalEncoder):
@@ -17,6 +17,11 @@ class IdentityEncoderDecoder(NonCanonicalEncoder):
                 else:
                     self.canonical_binary_predicates.append(predicate)
         else:
+            # Unlike ICLREncoderDecoder, a signature-less identity encoder is a legitimate use case
+            # (e.g. for decode_fact/get_canonical_equivalent alone), so only check disjointness when
+            # both lists are actually given.
+            if unary_predicates is not None and binary_predicates is not None:
+                assert set(unary_predicates).isdisjoint(set(binary_predicates)) # Sanity check
             self.canonical_binary_predicates = binary_predicates
             self.canonical_unary_predicates = unary_predicates
 
@@ -46,6 +51,8 @@ class IdentityEncoderDecoder(NonCanonicalEncoder):
         return predicate
 
     def unary_can_predicate_to_data_predicate_arity(self, predicate:str):
+        # Unlike ICLREncoderDecoder, identity encoding never folds a binary data predicate into a
+        # unary canonical one, so any unary canonical predicate always corresponds to an arity-1 one.
         return 1
 
     def unfold_all(self, can_conj:TreeShapedConjunction, internal_encoder:CanonicalEncoderDecoder, head_predicate: str):
@@ -64,13 +71,14 @@ class IdentityEncoderDecoder(NonCanonicalEncoder):
 
         var_id_to_datavar = {0: root_variable}
         for var_id in range(len(can_conj)):
-            for feat in can_conj.features[var_id]:
+            for feat in can_conj.features[var_id].elements():
                 can_predicate = internal_encoder.unary_pred_position_dict.inverse[feat]
                 data_conj.append((var_id_to_datavar[var_id], TYPE_PRED, can_predicate)) # canonical pred is data pred
             for (_, col, _), child_id in can_conj.children[var_id].items():
-                var_id_to_datavar = {child_id: new_variable()}
+                var_id_to_datavar[child_id]=new_variable()
                 bin_predicate = internal_encoder.binary_pred_colour_dict.inverse[col]
                 data_conj.append((var_id_to_datavar[child_id], bin_predicate, var_id_to_datavar[var_id])) # This order
+        # head_predicate is always unary here (edges don't change)
         head = (root_variable, TYPE_PRED, head_predicate)
 
         return [data_conj], head

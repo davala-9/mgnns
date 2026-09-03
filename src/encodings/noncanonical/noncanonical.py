@@ -1,18 +1,17 @@
 from src.encodings.canonical import CanonicalEncoderDecoder
 from src.model.cd_graph import CDGraph
-from src.rule_extraction.tree_shaped_conjunction import TreeShapedConjunction, Variable
+from src.rule_extraction.tree_shaped_conjunction import TreeShapedConjunction
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 ineq_pred = "owl:differentFrom"
 
-# This is an auxiliary class for the "unfold" method of non-canonical decodings.
-# It helps unfold a rule whenever we want an unfolding that can be grounded on a specific fact.
+# This is an auxiliary class for the "unfold" method. It helps unfold a rule that can be grounded on a specific fact.
 @dataclass
 class GroundContext:
-    fact: [str,str,str]
-    graph: CDGraph
-    canonical_variable_to_constant_index: dict[Variable,int]
+    fact: [str,str,str] # Fact to be explained
+    graph: CDGraph # Graph on which the fact was predicted
+    canonical_variable_to_constant_index: dict[int,int] # map of pre-unfold variables to constants in the cd-graph
 
 class NonCanonicalEncoder(ABC):
 
@@ -27,6 +26,8 @@ class NonCanonicalEncoder(ABC):
     def decode_dataset(self, dataset: set[tuple]) -> set[tuple]:
         pass
 
+
+    # Maps a canonical unary fact to the corresponding unary or binary data fact.
     @abstractmethod
     def decode_fact(self, s: str, p:str, o:str) -> tuple[str, str, str]:
         pass
@@ -44,15 +45,13 @@ class NonCanonicalEncoder(ABC):
         pass
 
     # This function takes a tree-shaped conjunction expressed in the Canonical Signature and
-    # returns all possible unfoldings, together with the rule head.
-    # (Returning both together incurs some coupling, but it allows us to optimise slightly the extraction procedure)
+    # returns all possible unfoldings, and the rule head.
     @abstractmethod
     def unfold_all(self, can_conj:TreeShapedConjunction, internal_encoder:CanonicalEncoderDecoder, head_predicate: str):
         pass
 
-    # This function takes a tree-shaped conjunction expressed in the Canonical Signature and some extra information
-    # about how this conjunction is grounded in the canonical dataset, and then returns ONE specific unfolding that
-    # can be grounded in the data dataset, together with the rule head.
+    # This function takes a tree-shaped conjunction expressed in the Canonical Signature and a GroundContext, and
+    # then returns ONE specific unfolding that can be grounded in the data-signature dataset, and the rule head.
     @abstractmethod
     def unfold_match_ground(self, can_conj: TreeShapedConjunction, internal_encoder: CanonicalEncoderDecoder,
                head_predicate: str, grounding_context: GroundContext):
