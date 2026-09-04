@@ -109,7 +109,7 @@ def test(dd, external_encoder, internal_encoder, model, exp_cfg, device, ef):
     test_graph_dataset = parse(check(dd / "test_graph.tsv", "Test graph"))
     trace = TraceCollector()
     predictions = apply_gnn_transformation(test_graph_dataset, external_encoder, internal_encoder, model,
-                                           cfg.derivation_threshold, device, trace_collector=trace)
+                                           exp_cfg.derivation_threshold, device, trace_collector=trace)
     compute_metrics(predictions, dd / "test_pos.tsv", dd / "test_neg.tsv", ef / "test_metrics.txt")
     return predictions, test_graph_dataset, trace
 

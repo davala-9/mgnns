@@ -9,8 +9,6 @@ one for coloured edges, and one for colourless edges.
 
 @author: ----
 """
-from os import write
-
 import torch
 
 from torch_geometric.nn import MessagePassing
@@ -25,7 +23,6 @@ class EC_GCNConv(MessagePassing):
     # out_channels (int) - Size of each output sample
     def __init__(self, in_channels, out_channels, edge_colours, aggregation):
 
-        self.aggr = aggregation
         aggr_name = getattr(aggregation, "value", aggregation)
         if aggr_name not in {"sum","max"}:
             raise ValueError(f"Unsupported aggregation mode: {aggr_name!r}")
@@ -98,7 +95,7 @@ class GNN(torch.nn.Module):
         elif layer == 2:
             return self.lin_self_2.weight.detach()
         else:
-            return None
+            raise ValueError(f"invalid layer: {layer!r} (model has {self.num_layers} layers)")
 
     def matrix_B(self, layer, colour):
         if layer == 1:
@@ -106,7 +103,7 @@ class GNN(torch.nn.Module):
         elif layer == 2:
             return self.conv2.weights[colour].detach()
         else:
-            return None
+            raise ValueError(f"invalid layer: {layer!r} (model has {self.num_layers} layers)")
 
     def bias(self, layer):
         if layer == 1:
@@ -114,7 +111,7 @@ class GNN(torch.nn.Module):
         elif layer == 2:
             return self.lin_self_2.bias.detach() - 10
         else:
-            return None
+            raise ValueError(f"invalid layer: {layer!r} (model has {self.num_layers} layers)")
 
     def activation(self, layer):
         if layer == 1:
@@ -123,7 +120,7 @@ class GNN(torch.nn.Module):
             m = torch.nn.Sigmoid()
             return m
         else:
-            return None
+            raise ValueError(f"invalid layer: {layer!r} (model has {self.num_layers} layers)")
 
     def aggregation_function(self, layer):
         if layer == 1:
@@ -131,5 +128,5 @@ class GNN(torch.nn.Module):
         elif layer == 2:
             return self.agg_2
         else:
-            return None
+            raise ValueError(f"invalid layer: {layer!r} (model has {self.num_layers} layers)")
 #

@@ -41,9 +41,9 @@ class FactExplainer:
     def get_basic_explanation(self, fact_context: FactContext):
         explanation_builder = TreeShapedConjunctionBuilder(self.internal_encoder.get_n_binary_predicates())
         L = self.model.num_layers
-        explanation_builder.add(features=None,level=L,parent=None) # Root node
+        explanation_builder.add(features=None,level=L,parent=-1) # Root node
         # Companion to basic_explanation. Maps a variable id to the id of the constant that grounds it. \nu in the paper
-        varid_2_constid = [fact_context.cd_fact_const_index]
+        varid_2_constid = {0: fact_context.cd_fact_const_index}
         # Companion to basic_explanation. Maps a (var id, layer) to the relevant Feature Mask. This is the paper's \mu.
         initial_mask = BitSet.from_subset(self.model.layer_dimension(L),{fact_context.cd_fact_pred_pos})
         var_layer_mask = {(0, L): initial_mask}
@@ -83,7 +83,7 @@ class FactExplainer:
     def explain_fact(self, fact: tuple[str,str,str]):
 
         fact_context = FactContext(fact, self.external_encoder, self.internal_encoder, self.node_to_index)
-        assert self.activations[2][fact_context.cd_fact_const_index][fact_context.cd_fact_pred_pos] >= self.threshold, \
+        assert self.activations[2][fact_context.cd_fact_const_index][fact_context.cd_fact_pred_pos] > self.threshold, \
             "Error: the fact to be explained is not derived by the model on this dataset."
 
         print("Computing Gamma_i")
@@ -110,7 +110,9 @@ class FactExplainer:
                                         threshold=self.threshold,
                                         pred_position=fact_context.cd_fact_pred_pos,
                                         base_tree=rule_body)
-        rule_body.simplify(optimiser3.minimise_rule())
+        minimised = optimiser3.minimise_rule()
+        if minimised is not None:  # If no simplification was found in time, keep the original rule_body
+            rule_body = rule_body.extract_from_compact(minimised)
         # TODO: this should be a call to the external encoder
         if fact_context.ent2 == TYPE_PRED:
             head_predicate = fact_context.ent3

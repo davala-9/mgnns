@@ -1,8 +1,9 @@
 import torch
 from dataclasses import dataclass, field
+from typing import Optional
 
 # Implementation of a (col,d)-graph. It simply packages many variables into one for convenience, with some checks.
-# Colours are ALWAYS represented by integers 1...n (this is what the pytorch geometric model needs)
+# Colours are ALWAYS represented by integers 0...(n-1)
 # Features is a |nodes| x delta matrix. Each row represents a node and its feature.
 # Edges is a 2 x |edges| matrix where each column is of the form [i,j] representing an edge from the node
 # represented by row i of self.features to the node represented by row j
@@ -18,9 +19,10 @@ class CDGraph:
         assert delta > 0
         assert features.shape[0] == len(node_names)
         assert features.shape[1] == delta
-        assert edges.shape[1] == edge_colours.shape[0]
         assert edges.shape[0] == 2
-        assert all(colour in range(col_size) for colour in edge_colours)
+        assert edges.shape[1] == edge_colours.shape[0]
+        assert bool(((edge_colours >= 0) & (edge_colours < col_size)).all())
+        assert edges.numel() == 0 or bool((edges.min() >= 0) & (edges.max() < len(node_names)))
         assert len(node_names) == len(set(node_names)) # No repeated node names
 
         self.col_size = col_size
@@ -28,15 +30,16 @@ class CDGraph:
         self.features = features
         self.edges = edges
         self.edge_colours = edge_colours
-        self.node_names = node_names
+        self.node_names = list(node_names)  # copy, so mutating the caller's list can't desync node_names_to_indices
         self.node_names_to_indices = {n_name: index for index, n_name in enumerate(self.node_names)}
 
 
     def clone(self):
-        return CDGraph(col_size=self.col_size,delta=self.delta,features=self.features,
-                       edges=self.edges,edge_colours=self.edge_colours,node_names=self.node_names)
+        return CDGraph(col_size=self.col_size, delta=self.delta, features=self.features.clone(),
+                       edges=self.edges.clone(), edge_colours=self.edge_colours.clone(),
+                       node_names=self.node_names)
 
 @dataclass
 class TraceCollector:
-    cd_graph: CDGraph = None
+    cd_graph: Optional[CDGraph] = None
     activations: dict[int, torch.Tensor] = field(default_factory=dict)

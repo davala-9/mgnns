@@ -45,7 +45,7 @@ class TreeShapedConjunction:
             for edge, child_id  in self.children[par_id].items():
                 if child_id == var_id:
                    self.parent_edge.append(edge)
-                   continue
+                   break
         self.parent_edge = tuple(self.parent_edge)
 
     # This takes a variable and returns the minimal subtree connecting it to the root
@@ -64,11 +64,6 @@ class TreeShapedConjunction:
         new_tree = builder.build()
         return new_tree, sub_ids_2_original_ids
 
-    # Takes a different TSC homomorphic to this one
-    def combine(self, other_tree, other_id_to_this_id):
-        for other_id in range(len(other_tree)):
-            this_id = other_id_to_this_id[other_id]
-
     # Returns the compact subtree representing the empty subtree (root node only, no unary flags)
     @cached_property
     def initial_compact(self):
@@ -77,19 +72,18 @@ class TreeShapedConjunction:
     @cached_property
     # Pass this as a cd graph where nodes are ordered according to id and labelled "dummynode-id"
     def as_cd_graph(self):
-        intial_features = torch.zeros((len(self),self.features[0].dimension))
+        initial_features = torch.zeros((len(self),self.features[0].dimension))
         edges = [[], []]
         edge_colours = []
         node_names = [f"dummynode_{i}" for i in range(len(self))] # The node names do not matter for this.
         for var_id in range(len(self)):
-            self.features[var_id] = torch.tensor(self.features[var_id].as_vector())
             for (_, col, _), child_id in self.children[var_id].items():
                 edges[0].append(child_id)
                 edges[1].append(var_id)
                 edge_colours.append(col)
         return CDGraph(col_size=self.n_colours,
                        delta=self.features[0].dimension,
-                       features = intial_features,
+                       features = initial_features,
                        edges = torch.tensor(edges, dtype=torch.long),
                        edge_colours = torch.tensor(edge_colours, dtype=torch.long),
                        node_names = node_names)
@@ -107,9 +101,12 @@ class TreeShapedConjunction:
             new_features.append(self.features[var_id].from_compressed(compact.masks[new_id]))
             new_levels.append(self.levels[var_id])
             new_children.append({})
-            parent_new_id = var_id_to_compact_index[self.parent[var_id]] # new id of the parent
-            new_parent.append(parent_new_id)
-            new_children[parent_new_id][self.parent_edge[var_id]] = new_id
+            if self.parent[var_id] == -1:  # root: no parent to register
+                new_parent.append(-1)
+            else:
+                parent_new_id = var_id_to_compact_index[self.parent[var_id]] # new id of the parent
+                new_parent.append(parent_new_id)
+                new_children[parent_new_id][self.parent_edge[var_id]] = new_id
 
         return TreeShapedConjunction(self.n_colours, tuple(new_features),
                                      tuple(new_levels), tuple(new_children), tuple(new_parent))
@@ -121,7 +118,7 @@ class TreeShapedConjunction:
         # close under ancestors, adding missing predecessors
         keep = set()
         for node in subtree_nodes:
-            while node is not None and node not in keep:
+            while node != -1 and node not in keep:
                 keep.add(node)
                 node = self.parent[node]
 
@@ -133,7 +130,7 @@ class TreeShapedConjunction:
         # construct new tree
         subtree_node_to_feature = dict(zip(subtree_nodes, subtree_features))
         new_features = [subtree_node_to_feature.get(old, BitSet.from_subset(feat_dim,set())) for old in order]
-        new_parent = [old_id_to_new_id.get(self.parent[old], None) for old in order]
+        new_parent = [old_id_to_new_id.get(self.parent[old], -1) for old in order]
         new_level = [self.levels[old] for old in order]
         new_edges = [
             {label: old_id_to_new_id[child_id] for label, child_id in self.children[old].items() if child_id in keep}
@@ -162,7 +159,7 @@ class CompactSubTree:
                 yield CompactSubTree(self.var_ids, self.masks[:var_id] + (new_mask,) + self.masks[var_id + 1:])
         # Next, get successors obtained by adding a NEW child
         added_children = set() # First we extract all new nodes that need to be added
-        added_children.update(child_id for var_id in self.var_ids for child_id in base_tree.children[var_id])
+        added_children.update(child_id for var_id in self.var_ids for child_id in base_tree.children[var_id].values())
         added_children.difference_update(self.var_ids) # Remove those that are already present in the subtree
         added_children = sorted(added_children) # Sorted in ascending order
         # Efficient generation of the new CompactSubTrees in one pass through both tuples
@@ -187,7 +184,7 @@ class CompactSubTree:
             if not mask.is_empty():
                 continue
             # Check there's no child of 'var_id' in the current subtree, before removing it; i.e. we only remove leaves
-            if any(child in node_set for child in base_tree.children[var_id]):
+            if any(child in node_set for child in base_tree.children[var_id].values()):
                 continue
             yield CompactSubTree(self.var_ids[:index] + self.var_ids[index + 1:],
                                  self.masks[:index] + self.masks[index + 1:])

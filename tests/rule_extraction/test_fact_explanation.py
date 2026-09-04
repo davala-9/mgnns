@@ -8,7 +8,7 @@ from src.encodings.noncanonical.identity import IdentityEncoderDecoder
 from src.model.cd_graph import TraceCollector, CDGraph
 from src.model.gnn_architectures import GNN
 from src.model.gnn_transformation import apply_model, apply_nc_decoder
-from src.rule_extraction.tree_shaped_conjunction import TreeShapedConjunction, Variable, walk
+from src.rule_extraction.tree_shaped_conjunction import TreeShapedConjunction
 from src.rule_extraction.fact_explanation import FactExplainer, FactContext
 from src.utils.utils import TYPE_PRED
 from src.utils.bitset import BitSet
@@ -352,36 +352,30 @@ class TestFactExplainer:
         conjunction, var_const_idx, var_layer_mask = fe.get_basic_explanation(fc)
         assert isinstance(conjunction, TreeShapedConjunction)
         assert len(conjunction) == 3
-        vx = conjunction.root_node
-        assert isinstance(vx, Variable)
-        assert vx.features == BitSet.from_subset(dimension=2, subset={0})
-        assert vx.level == 2
-        assert (2, 1, 0) in vx.children  # In layer 2, we introduce a child variable via S (1) for position 0
-        assert (1, 0, 0) in vx.children  # In layer 1, we introduce a child variable via R (0) for position 0
-        vy = vx.children[(2, 1, 0)]
-        assert isinstance(vy, Variable)
-        assert vy.features == BitSet.from_subset(dimension=2, subset={0})
-        assert vy.level == 1
-        assert vy.children == {}
-        vz = vx.children[(1, 0, 0)]
-        assert isinstance(vz, Variable)
-        assert vz.features == BitSet.from_subset(dimension=2, subset={0})
-        assert vz.level == 0
-        assert vz.children == {}
+        # Root variable is always var_id 0
+        assert conjunction.features[0] == BitSet.from_subset(dimension=2, subset={0})
+        assert conjunction.levels[0] == 2
+        assert (2, 1, 0) in conjunction.children[0]  # In layer 2, we introduce a child variable via S (1) for position 0
+        assert (1, 0, 0) in conjunction.children[0]  # In layer 1, we introduce a child variable via R (0) for position 0
+        vy = conjunction.children[0][(2, 1, 0)]
+        assert conjunction.features[vy] == BitSet.from_subset(dimension=2, subset={0})
+        assert conjunction.levels[vy] == 1
+        assert conjunction.children[vy] == {}
+        vz = conjunction.children[0][(1, 0, 0)]
+        assert conjunction.features[vz] == BitSet.from_subset(dimension=2, subset={0})
+        assert conjunction.levels[vz] == 0
+        assert conjunction.children[vz] == {}
 
         # Verify the mapping of variables to constants (the paper's \nu)
-        assert vx in var_const_idx
-        assert var_const_idx[vx] == 0
-        assert vy in var_const_idx
+        assert var_const_idx[0] == 0
         assert var_const_idx[vy] == 1
-        assert vz in var_const_idx
         assert var_const_idx[vz] == 1
 
         # Verify the (var,layer) to mask mapping (the paper's \mu)
         # These expected results were done by hand.
-        assert var_layer_mask[(vx, 2)] == BitSet.from_subset(2, {0})
-        assert var_layer_mask[(vx, 1)] == BitSet.from_subset(4, {0, 1})
-        assert var_layer_mask[(vx, 0)] == BitSet.from_subset(2, {0})
+        assert var_layer_mask[(0, 2)] == BitSet.from_subset(2, {0})
+        assert var_layer_mask[(0, 1)] == BitSet.from_subset(4, {0, 1})
+        assert var_layer_mask[(0, 0)] == BitSet.from_subset(2, {0})
         assert (vy, 2) not in var_layer_mask
         assert var_layer_mask[(vy, 1)] == BitSet.from_subset(4, {0})
         assert var_layer_mask[(vy, 0)] == BitSet.from_subset(2, {0})
@@ -409,44 +403,36 @@ class TestFactExplainer:
         conjunction, var_const_idx, var_layer_mask = fe.get_basic_explanation(fc)
         assert isinstance(conjunction, TreeShapedConjunction)
         assert len(conjunction) == 4
-        vx = conjunction.root_node  # represents ab
-        assert isinstance(vx, Variable)
-        assert vx.features == BitSet.from_subset(dimension=3, subset={})
-        assert vx.level == 2
-        assert (2, 0, 0) in vx.children  # In layer 2, we introduce a child variable via c1 (0) for position 0
-        vy = vx.children[(2, 0, 0)]  # represents a
-        assert isinstance(vy, Variable)
-        assert vy.features == BitSet.from_subset(dimension=3, subset={0})
-        assert vy.level == 1
-        assert (1, 0, 2) in vy.children  # In layer 1, we introduce a child variable via c1 (0) for position 2
-        vz = vy.children[(1, 0, 2)]  # represents az
-        assert isinstance(vz, Variable)
-        assert vz.features == BitSet.from_subset(dimension=3, subset={2})
-        assert vz.level == 0
-        assert vz.children == {}
-        assert (2, 2, 1) in vx.children  # In layer 2, we introduce a child variable via c3 (2) for position 1
-        vt = vx.children[(2, 2, 1)]  # represents ba
-        assert isinstance(vt, Variable)
-        assert vt.features == BitSet.from_subset(dimension=3, subset={2})
-        assert vt.level == 1
-        assert vt.children == {}
+        # Root variable (var_id 0) represents ab
+        assert conjunction.features[0] == BitSet.from_subset(dimension=3, subset=set())
+        assert conjunction.levels[0] == 2
+        assert (2, 0, 0) in conjunction.children[0]  # In layer 2, we introduce a child variable via c1 (0) for position 0
+        vy = conjunction.children[0][(2, 0, 0)]  # represents a
+        assert conjunction.features[vy] == BitSet.from_subset(dimension=3, subset={0})
+        assert conjunction.levels[vy] == 1
+        assert (1, 0, 2) in conjunction.children[vy]  # In layer 1, we introduce a child variable via c1 (0) for position 2
+        vz = conjunction.children[vy][(1, 0, 2)]  # represents az
+        assert conjunction.features[vz] == BitSet.from_subset(dimension=3, subset={2})
+        assert conjunction.levels[vz] == 0
+        assert conjunction.children[vz] == {}
+        assert (2, 2, 1) in conjunction.children[0]  # In layer 2, we introduce a child variable via c3 (2) for position 1
+        vt = conjunction.children[0][(2, 2, 1)]  # represents ba
+        assert conjunction.features[vt] == BitSet.from_subset(dimension=3, subset={2})
+        assert conjunction.levels[vt] == 1
+        assert conjunction.children[vt] == {}
 
         # Verify the mapping of variables to constants (the paper's \nu)
         # Recall constant order is a, ab, b, ba
-        assert vx in var_const_idx
-        assert var_const_idx[vx] == 1  # ab
-        assert vy in var_const_idx
+        assert var_const_idx[0] == 1  # ab
         assert var_const_idx[vy] == 0  # a
-        assert vz in var_const_idx
         assert var_const_idx[vz] == 1  # ab
-        assert vt in var_const_idx
         assert var_const_idx[vt] == 3  # ba
 
         # Verify the (var,layer) to mask mapping (the paper's \mu)
         # These expected results were done by hand.
-        assert var_layer_mask[(vx, 2)] == BitSet.from_subset(3, {1})
-        assert var_layer_mask[(vx, 1)] == BitSet.from_subset(6, {})
-        assert var_layer_mask[(vx, 0)] == BitSet.from_subset(3, {})
+        assert var_layer_mask[(0, 2)] == BitSet.from_subset(3, {1})
+        assert var_layer_mask[(0, 1)] == BitSet.from_subset(6, {})
+        assert var_layer_mask[(0, 0)] == BitSet.from_subset(3, {})
         assert (vy, 2) not in var_layer_mask
         assert var_layer_mask[(vy, 1)] == BitSet.from_subset(6, {0})
         assert var_layer_mask[(vy, 0)] == BitSet.from_subset(3, {0})

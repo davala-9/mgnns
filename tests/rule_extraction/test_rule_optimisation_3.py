@@ -16,11 +16,11 @@ class FakeSubtree:
         self._sound = sound
         self.soundness_calls = 0
 
-    def check_soundness(self, device, model, threshold, pred_position):
+    def check_soundness(self, base_tree, device, model, threshold, pred_position):
         self.soundness_calls += 1
         return self._sound
 
-    def get_successors(self):
+    def get_successors(self, base_tree):
         return list(self._successors)
 
     def __eq__(self, other):
@@ -35,7 +35,7 @@ class FakeSubtree:
 
 class FakeBaseTree:
     def __init__(self, initial_subtree):
-        self.initial_subtree = initial_subtree
+        self.initial_compact = initial_subtree
 
 
 @pytest.fixture

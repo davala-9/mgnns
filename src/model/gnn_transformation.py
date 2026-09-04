@@ -1,4 +1,4 @@
-from inspect import trace
+import torch
 from src.model.cd_graph import CDGraph
 from torch_geometric.data import Data
 
@@ -27,7 +27,8 @@ def apply_model(cd_graph:CDGraph, device, model, trace_collector=None):
 
     # Apply model
     model.eval()
-    features_layer_2, features_layer_1 = model(data)  # note: features_layer_1 comes already detached
+    with torch.no_grad():
+        features_layer_2, features_layer_1 = model(data)  # note: features_layer_1 comes already detached
     if trace_collector is not None:
         trace_collector.cd_graph = cd_graph
         trace_collector.activations[2] = features_layer_2.detach().clone()
@@ -52,7 +53,7 @@ def apply_nc_decoder(cd_facts_scores_dict, external_encoder):
         # TODO: this could be a set, of many or none
         if result is not None: # Some canonical facts dont turn into facts
             ss, pp, oo = result
-            facts_scores_dict[(ss, pp, oo)] = cd_facts_scores_dict[(s, p, o)]
+            facts_scores_dict[(ss, pp, oo)] = score
     return facts_scores_dict
 
 

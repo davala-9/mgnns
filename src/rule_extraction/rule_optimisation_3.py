@@ -61,10 +61,10 @@ class RuleOptimisation3:
             subtree = frontier.pop()
             if subtree in explored:
                 continue
-            if subtree.check_soundness(self.device,self.model,self.threshold,self.pred_position):
+            if subtree.check_soundness(self.base_tree,self.device,self.model,self.threshold,self.pred_position):
                 return subtree
             explored.add(subtree)
-            for successor in subtree.get_successors():
+            for successor in subtree.get_successors(self.base_tree):
                 frontier.push(successor)
         return None
 
