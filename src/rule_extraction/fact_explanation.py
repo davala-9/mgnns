@@ -8,17 +8,19 @@ from src.encodings.noncanonical.noncanonical import NonCanonicalEncoder, GroundC
 from src.rule_extraction.tree_shaped_conjunction import TreeShapedConjunctionBuilder
 from src.utils.utils import TYPE_PRED, backpropagate_relevance
 from src.utils.bitset import BitSet
+from src.rule_extraction.rule_optimisation_1 import apply_optimisation as apply_optimisation_1
+from src.rule_extraction.rule_optimisation_2 import apply_optimisation as apply_optimisation_2
 from src.rule_extraction.rule_optimisation_3 import RuleOptimisation3
 from src.datalog.apply_rules import apply_rule
 
 # We bundle a bunch of auxiliary info about a fact we want to explain
 class FactContext:
     def __init__(self, fact: tuple[str, str, str], external_encoder: NonCanonicalEncoder,
-                 internal_encoder: CanonicalEncoderDecoder, node_to_index_dict):
+                 internal_encoder: CanonicalEncoderDecoder, constant_to_index_dict):
         self.fact = fact
         self.ent1, self.ent2, self.ent3 = fact
         self.cd_ent1, self.cd_ent2, self.cd_ent3 = external_encoder.get_canonical_equivalent(fact)
-        self.cd_fact_const_index = node_to_index_dict[self.cd_ent1]
+        self.cd_fact_const_index = constant_to_index_dict[self.cd_ent1]
         self.cd_fact_pred_pos = internal_encoder.unary_pred_position_dict[self.cd_ent3]
 
 # This class manages the explanation of a fact derived by the GNN
@@ -33,7 +35,7 @@ class FactExplainer:
         self.internal_encoder = internal_encoder
         self.activations = trace.activations
         self.cd_graph = trace.cd_graph
-        self.node_to_index = {node: i for i, node in enumerate(self.cd_graph.node_names)}  # Helpful dictionary
+        self.constant_to_index = {constant: i for i, constant in enumerate(self.cd_graph.node_names)}
         self.input_dataset = input_dataset
 
     # This is the Gamma_i in the papers. It computes a most general explanation but prunes exploiting matrix sparsity
@@ -82,7 +84,7 @@ class FactExplainer:
 
     def explain_fact(self, fact: tuple[str,str,str]):
 
-        fact_context = FactContext(fact, self.external_encoder, self.internal_encoder, self.node_to_index)
+        fact_context = FactContext(fact, self.external_encoder, self.internal_encoder, self.constant_to_index)
         assert self.activations[2][fact_context.cd_fact_const_index][fact_context.cd_fact_pred_pos] > self.threshold, \
             "Error: the fact to be explained is not derived by the model on this dataset."
 
@@ -90,20 +92,23 @@ class FactExplainer:
         rule_body, var_const_idx, var_layer_mask = self.get_basic_explanation(fact_context)
         print("Length Gamma_i: {}".format(len(rule_body)))
 
-        # TODO: Refactor all 3 optimisations
-        # print("Attempting approximation 1...")
-        # optimised_body_1 = run_optimisation_1(self)
-        # print("Length rule 1: {}".format(len(optimised_body_1)))
+        print("Attempting optimisation 1...")
+        optimised_body_1 = apply_optimisation_1(self, rule_body, fact_context.cd_fact_pred_pos, var_layer_mask)
+        print("Length rule 1: {}".format(len(optimised_body_1)))
 
-        # print("Attempting approximation 2...")
-        # optimised_body_2 = run_optimisation_2(self)
-        # print("Length rule 2: {}".format(len(optimised_body_2)))
+        # Optimisation 2's analytic weight-product approach only applies to a 2-layer ReLU model.
+        optimised_body_2 = None
+        if self.model.num_layers == 2 and self.model.activation(1) is torch.relu:
+            print("Attempting optimisation 2...")
+            optimised_body_2 = apply_optimisation_2(self, rule_body, fact_context.cd_fact_pred_pos, var_layer_mask)
+            print("Length rule 2: {}".format(len(optimised_body_2)))
 
-        #if len(optimised_body_2) < len(optimised_body_1):
-        #    print("Approximation 2 wins")
-        #    rule_body = optimised_body_2
-        # else:
-        #    print("Approximation 1 wins")
+        if optimised_body_2 is not None and len(optimised_body_2) < len(optimised_body_1):
+            print("Optimisation 2 wins")
+            rule_body = optimised_body_2
+        else:
+            print("Optimisation 1 wins")
+            rule_body = optimised_body_1
 
         optimiser3 =  RuleOptimisation3(device=self.device,
                                         model=self.model,
@@ -135,7 +140,7 @@ class FactExplainer:
                 body_atoms.append("<{}>[?{}]".format(o, s))
             else:
                 body_atoms.append("<{}>[?{},?{}]".format(p, s, o))
-        if head[1] is not TYPE_PRED:
+        if head[1] != TYPE_PRED:
             written_head =  "<{}>[?{},?{}]".format(head[1], head[0], head[2])
         else:
             written_head = "<{}>[?{}]".format(head[2], head[0])
@@ -166,6 +171,5 @@ class FactExplainer:
         if self.input_dataset is not None:
             assert fact in apply_rule(rule,self.input_dataset)
 
-        # Return rule
         return rule
 

@@ -324,7 +324,7 @@ class TestFactContext:
     def test_fact_context_ex1(self):
         fe = make_mock_fe_1()
         fact = get_fact_ex1()
-        fact_context = FactContext(fact, fe.external_encoder, fe.internal_encoder, fe.node_to_index)
+        fact_context = FactContext(fact, fe.external_encoder, fe.internal_encoder, fe.constant_to_index)
         assert fact_context.cd_ent1 == "a"
         assert fact_context.cd_ent3 == "A"
         assert fact_context.cd_fact_const_index == 0
@@ -333,7 +333,7 @@ class TestFactContext:
     def test_fact_context_ex2(self):
         fe = make_mock_fe_2()
         fact = get_fact_ex2()
-        fact_context = FactContext(fact, fe.external_encoder, fe.internal_encoder, fe.node_to_index)
+        fact_context = FactContext(fact, fe.external_encoder, fe.internal_encoder, fe.constant_to_index)
         assert fact_context.cd_ent1 == "term-for-a-b"
         assert fact_context.cd_ent3 == "unary-for-R"
         assert fact_context.cd_fact_const_index == 1
@@ -344,11 +344,11 @@ class TestFactExplainer:
 
     def test_initialisation_ex1(self):
         fe = make_mock_fe_1()
-        assert fe.node_to_index == {"a": 0, "b": 1, "c": 2}
+        assert fe.constant_to_index == {"a": 0, "b": 1, "c": 2}
 
     def test_basic_explanation_ex1(self):
         fe = make_mock_fe_1()
-        fc = FactContext(get_fact_ex1(), fe.external_encoder, fe.internal_encoder, fe.node_to_index)
+        fc = FactContext(get_fact_ex1(), fe.external_encoder, fe.internal_encoder, fe.constant_to_index)
         conjunction, var_const_idx, var_layer_mask = fe.get_basic_explanation(fc)
         assert isinstance(conjunction, TreeShapedConjunction)
         assert len(conjunction) == 3
@@ -394,12 +394,12 @@ class TestFactExplainer:
 
     def test_initialisation_ex2(self):
         fe = make_mock_fe_2()
-        assert fe.node_to_index == {"a": 0, "term-for-a-b":1, "b":2, "term-for-b-a":3}
+        assert fe.constant_to_index == {"a": 0, "term-for-a-b":1, "b":2, "term-for-b-a":3}
 
     def test_fact_basic_explanation_ex2(self):
         # The conjunction should have 4 variables: x0 (for ab), x1 (for a), x2 (for ba), x3 (for az)
         fe = make_mock_fe_2()
-        fc = FactContext(get_fact_ex2(), fe.external_encoder, fe.internal_encoder, fe.node_to_index)
+        fc = FactContext(get_fact_ex2(), fe.external_encoder, fe.internal_encoder, fe.constant_to_index)
         conjunction, var_const_idx, var_layer_mask = fe.get_basic_explanation(fc)
         assert isinstance(conjunction, TreeShapedConjunction)
         assert len(conjunction) == 4

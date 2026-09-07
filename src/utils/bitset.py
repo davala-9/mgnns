@@ -37,7 +37,7 @@ class BitSet:
     def add_element(self,element):
         if element >= self.dimension:
             raise ValueError(f"Cannot add element {element} to a bitset of dimension {self.dimension}")
-        return BitSet.from_subset(self.dimension,{self.as_set().union({element})})
+        return BitSet.from_subset(self.dimension,self.as_set().union({element}))
 
     def subsetOf(self, other):
         if self.dimension != other.dimension:

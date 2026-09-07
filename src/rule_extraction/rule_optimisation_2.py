@@ -1,152 +1,108 @@
-# BEST APPROXIMATION 2
-# This uses old code, and can only be done for 2 layers and relu. Essentially it multiplies the products
-# of the matrix weights along an `influence path': for example, if we have 2 layers, position 1 in layer 0 affects
-# positions 2 and 3 in layer 1, which in turn affect position 4 in layer 2, (1->2->4) and (1->3->4) are two
-# differenc influence paths. We sort influence paths by value and add atoms in this order.
-if model.num_layers == 2 and model.activation(1) == torch.relu:
+from __future__ import annotations
+from typing import TYPE_CHECKING
 
-    # An input unit for a given node, i, and layer is a triple (node',col,j) where node' is connected to node
-    # via a link col (or, if col=-1, node'=node), and it holds that both the j-th feature of node' in layer-1 is
-    # positive, max among those features for the col and j, and the (i,j)-weight of the matrix for colour col
-    # (matrix A if col=-1) is also positive. Intuitively, it captures all inputs that affect the value of the
-    # ith feature of node in layer A, on this dataset.
-    def get_input_units(node_as_row, ii, layer):
-        return_list = []
-        for clr in set(can_encoder_decoder.colours).union({-1}):
-            if clr == -1:
-                matrix = model.matrix_A(layer)
-                nghbrs = {node_as_row}
-            else:
-                matrix = model.matrix_B(layer=layer, colour=clr)
-                mask = gd_edge_colour_list == clr
-                gd_clr_edge_list = gd_edge_list[:, mask]
-                nghbrs = set(gd_clr_edge_list[:, gd_clr_edge_list[1] == node_as_row][0].tolist())
-            for jj in range(model.layer_dimension(layer - 1)):
-                if matrix[ii][jj].item() > 0:
-                    mx_neighbour = None
-                    mx_value = 0
-                    for nghbr in nghbrs:
-                        feature = gnn_output_gd[layer - 1][nghbr][jj].item()
-                        if feature > mx_value:
-                            mx_neighbour = nghbr
-                            mx_value = feature
-                    if mx_neighbour is not None:
-                        return_list.append((mx_neighbour, clr, jj))
-        return return_list
+import torch
+
+from src.rule_extraction.tree_shaped_conjunction import TreeShapedConjunction
+from src.model.gnn_transformation import apply_model
+from src.utils.bitset import BitSet
+from src.utils.utils import find_index_and_insert
+
+if TYPE_CHECKING:  # avoid a circular import: fact_explanation.py imports this module back
+    from src.rule_extraction.fact_explanation import FactExplainer
 
 
-    r_body_dataset = []
-    if not test_gr_dataset(r_body_dataset):
-        contributions = []
-        for (source2_row, col2, j2) in get_input_units(cd_fact_gd_row, cd_fact_pred_pos, 2):
-            source2_node = gd_row_to_node_dict[source2_row]
-            if col2 == -1:
-                z2 = "X1"
-            else:
-                variable_counter += 1
-                z2 = "X" + str(variable_counter)
-                nu_node_to_variable_dict[source2_node] = z2
-                nu_variable_to_node_dict[z2] = source2_node
-            next_level = get_input_units(source2_row, j2, 1)
-            if col2 == -1:
-                matrix2 = model.matrix_A(layer=2)
-            else:
-                matrix2 = model.matrix_B(layer=2, colour=col2)
-            if not next_level:
-                c_value = matrix2[cd_fact_pred_pos][j2] * gnn_output_gd[1][cd_fact_gd_row][j2]
-                contributions.append((c_value, z2, None, col2, None, j2, None))
-            for (source1_row, col1, j1) in get_input_units(source2_row, j2, 1):
-                source1_node = gd_row_to_node_dict[source1_row]
-                if col1 == -1:
-                    z1 = z2
-                else:
-                    variable_counter += 1
-                    z1 = "X" + str(variable_counter)
-                    nu_node_to_variable_dict[source1_node] = z1
-                    nu_variable_to_node_dict[z1] = source1_node
-                if col1 == -1:
-                    matrix1 = model.matrix_A(layer=1)
-                else:
-                    matrix1 = model.matrix_B(layer=1, colour=col1)
-                contribution_value = matrix2[cd_fact_pred_pos][j2] * matrix1[j2][j1]
-                contributions.append((contribution_value, z2, z1, col2, col1, j2, j1))
-        if True:  # In contributions where the second colour col2 is -1, there might be multiple influence paths
-            # we sum them here
-            new_contributions = []
-            cont = {}
-            for contrib in contributions:
-                contribution_value, z2, z1, col2, col1, j2, j1 = contrib
-                if col2 == -1:
-                    if j1 in cont:
-                        cont[(z2, z1, col1, j1)] += contribution_value
-                    else:
-                        cont[(z2, z1, col1, j1)] = contribution_value
-                else:
-                    new_contributions.append(contrib)
-            for (z2, z1, col1, j1) in cont:
-                new_contributions.append((cont[z2, z1, col1, j1], z2, z1, col2, col1, 0, j1))
-            contributions = new_contributions
+# OPTIMISATION 2
+# Ported from the old (rule_optimisation_2_old.py) 2-layer/ReLU-only implementation, which computed an
+# *analytic* influence value for each candidate atom -- the product of weight-matrix entries along the
+# path connecting that atom to the head prediction -- instead of grounding and running the model per
+# atom (as Optimisation 1 does). Atoms are then greedily added in decreasing order of this weight until
+# the threshold is met, exactly like Optimisation 1's second phase.
+#
+# The old code assumed every variable is tied to a single scalar feature position at a time, so "multiply
+# two matrix entries" was unambiguous. The new BasicExplanation tree (built by get_basic_explanation) is
+# more general: a variable's relevant positions at a layer are a BitSet that can hold several bits at
+# once (var_layer_mask), since backpropagate_relevance aggregates "any positive row" across every
+# relevant position of its parent rather than tracking a single position-to-position link. So instead of
+# a flat product of two scalars, we propagate a full analytic WEIGHT VECTOR down through the tree: each
+# hop distributes the upstream weight across every matrix entry from a relevant row, and multiple
+# contributing rows are summed (weighted by their own upstream magnitude, not treated as equally-weighted
+# 1s). This reduces to the exact old formula whenever a hop has a single relevant position (the common
+# case, since a variable's own relevant position at its creation layer is always a single bit), and is
+# the direct generalisation of what the old code already did for its own multi-path case (its own
+# comment: "where col2 is -1 there might be multiple influence paths -- we sum them here").
 
-        contributions = sorted(contributions, reverse=True)
-        threshold_met = False
-        used_contributions = []
-        contributions_to_atoms_necessary = {}
-        while not threshold_met and contributions:
-            contrib = contributions.pop(0)
-            contributions_to_atoms_necessary[contrib] = []
-            used_contributions.append(contrib)
-            contribution_value, z2, z1, col2, col1, _, j1 = contrib
-            if col2 == -1:
-                if col1 is None:
-                    pass
-                elif col1 == -1:
-                    atom = ("X1", type_pred, can_encoder_decoder.position_unary_pred_dict[j1])
-                    r_body_dataset.append(atom)
-                    contributions_to_atoms_necessary[contrib].append(atom)
-                    threshold_met = test_gr_dataset(r_body_dataset)
-                else:
-                    binary_atom_1 = (z1, can_encoder_decoder.colour_binary_pred_dict[col1], "X1")
-                    contributions_to_atoms_necessary[contrib].append(binary_atom_1)
-                    if binary_atom_1 not in r_body_dataset:
-                        r_body_dataset.append(binary_atom_1)
-                        threshold_met = test_gr_dataset(r_body_dataset)
-                    if not threshold_met:
-                        atom = (z1, type_pred, can_encoder_decoder.position_unary_pred_dict[j1])
-                        contributions_to_atoms_necessary[contrib].append(atom)
-                        r_body_dataset.append(atom)
-                        threshold_met = test_gr_dataset(r_body_dataset)
-            else:
-                binary_atom_2 = (z2, can_encoder_decoder.colour_binary_pred_dict[col2], "X1")
-                contributions_to_atoms_necessary[contrib].append(binary_atom_2)
-                if binary_atom_2 not in r_body_dataset:
-                    r_body_dataset.append(binary_atom_2)
-                    threshold_met = test_gr_dataset(r_body_dataset)
-                if not threshold_met and col1 is not None:
-                    if col1 == -1:
-                        atom = (z2, type_pred, can_encoder_decoder.position_unary_pred_dict[j1])
-                        contributions_to_atoms_necessary[contrib].append(atom)
-                        r_body_dataset.append(atom)
-                        threshold_met = test_gr_dataset(r_body_dataset)
-                    else:
-                        binary_atom_1 = (z1, can_encoder_decoder.colour_binary_pred_dict[col1], z2)
-                        contributions_to_atoms_necessary[contrib].append(binary_atom_1)
-                        if binary_atom_1 not in r_body_dataset:
-                            r_body_dataset.append(binary_atom_1)
-                            threshold_met = test_gr_dataset(r_body_dataset)
-                        if not threshold_met:
-                            atom = (z1, type_pred, can_encoder_decoder.position_unary_pred_dict[j1])
-                            contributions_to_atoms_necessary[contrib].append(atom)
-                            r_body_dataset.append(atom)
-                            threshold_met = test_gr_dataset(r_body_dataset)
-        (gr_features, node_to_gr_row_dict, gr_edge_list, gr_colour_list) = can_encoder_decoder.encode_dataset(
-            r_body_dataset)
-        gr_dataset = Data(x=gr_features, edge_index=gr_edge_list, edge_type=gr_colour_list).to(device)
-        gnn_output_gr = model.all_labels(gr_dataset)
-        necessary_body_atoms = set()
-        while used_contributions:
-            contrib = used_contributions.pop()
-            (contribution_value, z2, z1, col2, col1, j2, j1) = contrib
-            # if gnn_output_gr[1][node_to_gr_row_dict[nodes.const_node_dict[z2]]][j2] != 0:
-            for atom in contributions_to_atoms_necessary[contrib]:
-                necessary_body_atoms.add(atom)
-        short_body_2 = list(necessary_body_atoms)
+
+def _compute_path_weights(model, rule_body: TreeShapedConjunction, var_layer_mask, predicate_position: int):
+    """Returns {(var_id, pos): weight} for every atom (var_id, pos) in rule_body, where `weight` is the
+    analytic, weight-product-based contribution of that atom to the head prediction position, computed
+    without running the model."""
+    root_level = rule_body.levels[0]
+    assert root_level == model.num_layers
+
+    # self_vec[(var_id, l)] is the propagated weight vector at layer l: for every position k, how much
+    # analytic weight reaches k, starting from the head prediction position and following var_id's own
+    # path (tree edges down to var_id, then self-hops within var_id down to layer l).
+    self_vec = {}
+    root_vec = torch.zeros(model.layer_dimension(root_level))
+    root_vec[predicate_position] = 1.0
+    self_vec[(0, root_level)] = root_vec
+
+    for var_id in range(len(rule_body)):
+        level = rule_body.levels[var_id]
+        if var_id != 0:
+            parent = rule_body.parent[var_id]
+            edge_layer, colour, child_pos = rule_body.parent_edge[var_id]
+            matrix = model.matrix_A(edge_layer) if colour == -1 else model.matrix_B(edge_layer, colour)
+            parent_vec = self_vec[(parent, edge_layer)]
+            edge_weight = sum(
+                parent_vec[j].item() * matrix[j, child_pos].item()
+                for j in var_layer_mask[(parent, edge_layer)].elements()
+            )
+            start_vec = torch.zeros(model.layer_dimension(level))
+            start_vec[child_pos] = edge_weight
+            self_vec[(var_id, level)] = start_vec
+        # Propagate var_id's own vector down to layer 0 via repeated self-hops (matrix_A only: neighbour
+        # aggregation is handled separately, via the tree's own children, not as a self-hop).
+        for l in range(level, 0, -1):
+            current = self_vec[(var_id, l)]
+            matrix = model.matrix_A(l)
+            next_vec = torch.zeros(model.layer_dimension(l - 1))
+            for j in var_layer_mask[(var_id, l)].elements():
+                next_vec += current[j].item() * matrix[j, :]
+            self_vec[(var_id, l - 1)] = next_vec
+
+    contributions = {}
+    for var_id in range(len(rule_body)):
+        base_vec = self_vec[(var_id, 0)]
+        for pos in rule_body.features[var_id].elements():
+            contributions[(var_id, pos)] = base_vec[pos].item()
+    return contributions
+
+
+def apply_optimisation(fe: FactExplainer, rule_body: TreeShapedConjunction, predicate_position: int,
+                        var_layer_mask):
+    assert fe.model.num_layers == 2 and fe.model.activation(1) is torch.relu, \
+        "Optimisation 2's analytic weight-product approximation is only meaningful for a 2-layer ReLU model"
+
+    contributions = _compute_path_weights(fe.model, rule_body, var_layer_mask, predicate_position)
+
+    # Sort candidate atoms by increasing analytic weight; pop() from the end to try the most
+    # strongly-weighted atoms first.
+    contributors_list = sorted((weight, var_id, pos) for (var_id, pos), weight in contributions.items())
+
+    selected_nodes = [0]
+    empty_bitset = BitSet.from_subset(fe.model.layer_dimension(0), {})
+    selected_features = [empty_bitset]
+
+    while contributors_list:
+        weight, var_id, pos = contributors_list.pop()
+        idx, is_new = find_index_and_insert(sorted_list=selected_nodes, element=var_id)
+        if is_new:
+            selected_features = (selected_features[:idx] + [empty_bitset] + selected_features[idx:])
+        selected_features[idx] = selected_features[idx].add_element(pos)
+        optimised_rule = rule_body.from_subtree(selected_nodes, selected_features)
+        output_graph = apply_model(optimised_rule.as_cd_graph, fe.device, fe.model)
+        if output_graph.features[0][predicate_position] > fe.threshold:
+            return optimised_rule
+    raise AssertionError("This part of the code should not be reachable. There's a bug in Optimisation 2")

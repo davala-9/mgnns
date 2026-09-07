@@ -13,7 +13,7 @@ class TreeShapedConjunctionBuilder:
         self.features, self.levels, self.children, self.parent = [], [], [], []
 
     def add(self, features, level, parent=-1, edge=None):
-        i = len(self.features)
+        i = self.num_vars() # new id equals current num of variables e.g. id 3 for current nodes 0, 1, 2
         self.features.append(features)
         self.levels.append(level)
         self.children.append({})
@@ -46,11 +46,13 @@ class TreeShapedConjunction:
                 if child_id == var_id:
                    self.parent_edge.append(edge)
                    break
+            else:
+                raise AssertionError(f"variable {var_id} not found among the children of its parent {par_id}")
         self.parent_edge = tuple(self.parent_edge)
 
-    # This takes a variable and returns the minimal subtree connecting it to the root
+    # Takes a variable and returns a TreeShapedConjunction that is the minimal subtree connecting it to the root
     def get_subtree_for(self, var_id: int, ):
-        if var_id >= len(self):
+        if not 0 <= var_id < len(self):
             raise ValueError(f"variable {var_id} does not appear to exist in the tree")
         # Construct backwards a list of variable ids, from the root variable to the variable in the input
         subtree_var_id_list = [var_id]
@@ -60,7 +62,7 @@ class TreeShapedConjunction:
         sub_ids_2_original_ids = bidict()
         for new_id, var_id in enumerate(subtree_var_id_list):
             sub_ids_2_original_ids[new_id] = var_id
-            builder.add(features=None,level=self.levels[var_id],parent=self.parent[var_id],edge=self.parent_edge[var_id])
+            builder.add(features=None,level=self.levels[var_id],parent=new_id - 1,edge=self.parent_edge[var_id])
         new_tree = builder.build()
         return new_tree, sub_ids_2_original_ids
 
@@ -72,13 +74,13 @@ class TreeShapedConjunction:
     @cached_property
     # Pass this as a cd graph where nodes are ordered according to id and labelled "dummynode-id"
     def as_cd_graph(self):
-        initial_features = torch.zeros((len(self),self.features[0].dimension))
+        initial_features = torch.tensor([f.as_vector() for f in self.features], dtype=torch.float)
         edges = [[], []]
         edge_colours = []
-        node_names = [f"dummynode_{i}" for i in range(len(self))] # The node names do not matter for this.
+        node_names = [f"dummynode_{i}" for i in range(len(self))]
         for var_id in range(len(self)):
             for (_, col, _), child_id in self.children[var_id].items():
-                edges[0].append(child_id)
+                edges[0].append(child_id) # This order: TSCs upper nodes occur later in the computation
                 edges[1].append(var_id)
                 edge_colours.append(col)
         return CDGraph(col_size=self.n_colours,
@@ -88,16 +90,12 @@ class TreeShapedConjunction:
                        edge_colours = torch.tensor(edge_colours, dtype=torch.long),
                        node_names = node_names)
 
-    # Returns another TreeShapedConjunction simplified as given by a compact tree.
+    # Returns another TreeShapedConjunction corresponding to the subtree given by a compact tree.
     def extract_from_compact(self, compact: "CompactSubTree"):
-        new_features = []
-        new_levels = []
-        new_children = []
-        new_parent = []
-
-        var_id_to_compact_index = {}
+        new_features, new_levels, new_children, new_parent = [], [], [], []
+        var_id_to_compact_index = {} # Match original var_id to the index of that var_id in the compact tree list
         for new_id, var_id in enumerate(compact.var_ids):
-            var_id_to_compact_index[var_id] = new_id # Match var_id to index in compact tree list
+            var_id_to_compact_index[var_id] = new_id
             new_features.append(self.features[var_id].from_compressed(compact.masks[new_id]))
             new_levels.append(self.levels[var_id])
             new_children.append({})
@@ -111,6 +109,8 @@ class TreeShapedConjunction:
         return TreeShapedConjunction(self.n_colours, tuple(new_features),
                                      tuple(new_levels), tuple(new_children), tuple(new_parent))
 
+    # Returns another TreeShapedConjunction corresponding to a subtree given by a list of nodes and its features.
+    # This is similar to a compact tree but the node labels are not compact.
     def from_subtree(self, subtree_nodes: list[int], subtree_features: list[BitSet]):
         assert len(subtree_nodes) > 0
         assert len(subtree_nodes)==len(subtree_features)
@@ -139,6 +139,12 @@ class TreeShapedConjunction:
         return TreeShapedConjunction(self.n_colours,features=tuple(new_features), levels = tuple(new_level),
                                      children=tuple(new_edges), parent=tuple(new_parent))
 
+    # Returns a new TreeShapedConjunction, identical to this one except that var_id's feature is replaced.
+    def with_feature(self, var_id: int, feature: BitSet) -> "TreeShapedConjunction":
+        if not 0 <= var_id < len(self):
+            raise ValueError(f"variable {var_id} does not appear to exist in the tree")
+        new_features = self.features[:var_id] + (feature,) + self.features[var_id + 1:]
+        return TreeShapedConjunction(self.n_colours, new_features, self.levels, self.children, self.parent)
 
     def __len__(self):
         return len(self.features)
@@ -151,6 +157,12 @@ class CompactSubTree:
     def __init__(self, var_ids: Tuple[int,...] = (), masks: Tuple[BitSet,...] = ()):
         self.var_ids = var_ids  # A frozen tuple containing the ids of the nodes that are present IN INCREASING ORDER
         self.masks = masks # A frozen tuple containing the compressed masks of the nodes that are present
+
+    def __eq__(self, other):
+        return isinstance(other, CompactSubTree) and self.var_ids == other.var_ids and self.masks == other.masks
+
+    def __hash__(self):
+        return hash((self.var_ids, self.masks))
 
     def get_successors(self, base_tree):
         # First get successors obtained by flipping a 0 to a 1 in the max of an existing node

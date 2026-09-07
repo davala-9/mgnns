@@ -107,6 +107,11 @@ def test_get_subtree_for_invalid_var_id_raises():
     with pytest.raises(ValueError):
         tree.get_subtree_for(5)
 
+def test_get_subtree_for_negative_var_id_raises():
+    tree = build_single_root_tree()
+    with pytest.raises(ValueError):
+        tree.get_subtree_for(-1)
+
 
 # --- initial_compact ---
 
@@ -125,13 +130,17 @@ def test_initial_compact_mask_is_empty_and_compressed():
 # --- as_cd_graph ---
 
 def test_as_cd_graph_basic_shape():
-    tree, _ = build_multi_node_tree()
+    tree, (root, child1, child2, grandchild) = build_multi_node_tree()
     g = tree.as_cd_graph
     assert g.col_size == 3
     assert g.delta == 5
     assert g.node_names == ["dummynode_0", "dummynode_1", "dummynode_2", "dummynode_3"]
     assert g.features.shape == (4, 5)
-    assert g.features.sum().item() == 0  # all-zero placeholder features
+    # Features reflect each node's own BitSet, not an all-zero placeholder
+    assert g.features[root].tolist() == tree.features[root].as_vector()
+    assert g.features[child1].tolist() == tree.features[child1].as_vector()
+    assert g.features[child2].tolist() == tree.features[child2].as_vector()
+    assert g.features[grandchild].tolist() == tree.features[grandchild].as_vector()
 
 def test_as_cd_graph_edges_reflect_child_to_parent_structure():
     tree, (root, child1, child2, grandchild) = build_multi_node_tree()
@@ -222,6 +231,29 @@ def test_get_predecessors_does_not_remove_node_with_children_present():
     assert (root, child1) in var_id_sets  # grandchild itself, a genuine empty leaf, can still be dropped
 
 
+# --- CompactSubTree equality/hashing ---
+
+def test_compact_subtree_equal_content_compares_equal():
+    a = CompactSubTree(var_ids=(0, 1), masks=(BitSet.from_subset(1, {0}), BitSet.from_subset(1, set())))
+    b = CompactSubTree(var_ids=(0, 1), masks=(BitSet.from_subset(1, {0}), BitSet.from_subset(1, set())))
+    assert a == b
+    assert hash(a) == hash(b)
+
+def test_compact_subtree_different_content_compares_unequal():
+    a = CompactSubTree(var_ids=(0, 1), masks=(BitSet.from_subset(1, {0}), BitSet.from_subset(1, set())))
+    b = CompactSubTree(var_ids=(0, 1), masks=(BitSet.from_subset(1, set()), BitSet.from_subset(1, set())))
+    assert a != b
+
+def test_compact_subtree_deduplicates_in_a_set():
+    tree, (root, child1, child2, grandchild) = build_multi_node_tree()
+    # Two independently-constructed but logically identical successors should collapse in a set,
+    # the way `explored`/`subsumed` bookkeeping in rule_optimisation_3.py and full_program.py relies on.
+    a = next(s for s in tree.initial_compact.get_successors(tree) if s.var_ids == (root, child1))
+    b = next(s for s in tree.initial_compact.get_successors(tree) if s.var_ids == (root, child1))
+    assert a is not b
+    assert len({a, b}) == 1
+
+
 # --- from_subtree ---
 
 def test_from_subtree_closes_under_ancestors():
@@ -250,6 +282,42 @@ def test_from_subtree_explicit_ancestor_and_descendant():
                                [BitSet.from_subset(5, {0}), BitSet.from_subset(5, {3})])
     assert len(result) == 3
     assert result.parent == (-1, 0, 1)
+
+
+# --- with_feature ---
+
+def test_with_feature_replaces_only_the_target_variable():
+    tree, (root, child1, child2, grandchild) = build_multi_node_tree()
+    new_feature = BitSet.from_subset(5, {4})
+    result = tree.with_feature(child1, new_feature)
+    assert result.features[child1] == new_feature
+    assert result.features[root] == tree.features[root]
+    assert result.features[grandchild] == tree.features[grandchild]
+
+def test_with_feature_does_not_mutate_the_original_tree():
+    tree, (root, child1, *_) = build_multi_node_tree()
+    original_feature = tree.features[child1]
+    tree.with_feature(child1, BitSet.from_subset(5, {4}))
+    assert tree.features[child1] == original_feature
+
+def test_with_feature_enables_populating_a_get_subtree_for_result():
+    tree, (root, child1, *_) = build_multi_node_tree()
+    sub, mapping = tree.get_subtree_for(child1)
+    assert sub.features == (None, None)  # freshly built, no labels yet
+    for new_id, original_id in mapping.items():
+        sub = sub.with_feature(new_id, tree.features[original_id])
+    assert sub.features == (tree.features[root], tree.features[child1])
+    assert sub.as_cd_graph.features.shape == (2, 5)  # now usable, unlike the all-None original
+
+def test_with_feature_invalid_var_id_raises():
+    tree = build_single_root_tree()
+    with pytest.raises(ValueError):
+        tree.with_feature(5, BitSet.from_subset(5, {0}))
+
+def test_with_feature_negative_var_id_raises():
+    tree = build_single_root_tree()
+    with pytest.raises(ValueError):
+        tree.with_feature(-1, BitSet.from_subset(5, {0}))
 
 
 # --- CompactSubTree.check_soundness ---

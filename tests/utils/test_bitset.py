@@ -89,3 +89,28 @@ def test_set_operations_return_new_instances():
     assert result is not b
     assert a.as_set() == {1, 2}
     assert b.as_set() == {2, 3}
+
+
+def test_add_element():
+    bs = BitSet.from_subset(8, {1, 3})
+    result = bs.add_element(5)
+    assert result.as_set() == {1, 3, 5}
+
+
+def test_add_element_already_present_is_idempotent():
+    bs = BitSet.from_subset(8, {1, 3})
+    result = bs.add_element(3)
+    assert result.as_set() == {1, 3}
+
+
+def test_add_element_returns_new_instance():
+    bs = BitSet.from_subset(8, {1, 3})
+    result = bs.add_element(5)
+    assert result is not bs
+    assert bs.as_set() == {1, 3}  # original left untouched
+
+
+def test_add_element_out_of_range_raises():
+    bs = BitSet.from_subset(5, {0, 2})
+    with pytest.raises(ValueError):
+        bs.add_element(5)

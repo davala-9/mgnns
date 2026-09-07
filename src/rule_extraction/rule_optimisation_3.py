@@ -22,6 +22,7 @@ class SinglePathFrontier:
     def is_empty(self) -> bool:
         return self._item is None
 
+# Currently not in use, but might come in handy to explore alternative strategies.
 class DFSFrontier:
     def __init__(self):
         self._stack: list[CompactSubTree] = []
@@ -42,6 +43,8 @@ class BFSFrontier:
     def is_empty(self) -> bool:
         return len(self._queue) == 0
 
+# Takes a TreeShapedConjunction and attempts to find a minimal sound subtree, as another #TreeShapedConjunction.
+# It spends some amount of time trying minimal extraction with BFS, then it gives up and uses greedy path climb.
 class RuleOptimisation3:
 
     def __init__(self, device, model, threshold, pred_position, base_tree:TreeShapedConjunction):
@@ -53,19 +56,19 @@ class RuleOptimisation3:
 
     def graph_search(self, frontier: Frontier, timeout: float | None = None):
         start = time.monotonic()
-        frontier.push(self.base_tree.initial_compact)
-        explored = set()
+        root = self.base_tree.initial_compact
+        seen = {root} # Dedup at push time, so we never enqueue a node we've already discovered
+        frontier.push(root)
         while not frontier.is_empty():
             if timeout is not None and time.monotonic() - start > timeout:
                 return None
             subtree = frontier.pop()
-            if subtree in explored:
-                continue
             if subtree.check_soundness(self.base_tree,self.device,self.model,self.threshold,self.pred_position):
                 return subtree
-            explored.add(subtree)
             for successor in subtree.get_successors(self.base_tree):
-                frontier.push(successor)
+                if successor not in seen:
+                    seen.add(successor)
+                    frontier.push(successor)
         return None
 
     # Returns a minimal compact subtree
