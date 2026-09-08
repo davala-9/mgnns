@@ -134,7 +134,7 @@ def extract_program(ef, device, model, threshold, external_encoder, internal_enc
     program_extractor = EquivalentProgramExtractor(device, model, threshold, external_encoder,
                                                    internal_encoder)
     program_extractor.compute_all_upper_bounds()
-    program_extractor.get_all_rules(program_file, 50000)
+    program_extractor.get_all_rules(program_file, 30)
 
 def explain_facts(ef,predictions,device,model,cfg,trace,external_encoder, internal_encoder, test_graph_dataset):
     print("Computing prediction explanations...")
@@ -160,8 +160,8 @@ if __name__ == "__main__":
     predictions, test_graph_dataset, trace = test(cfg.data_dir, external_encoder, internal_encoder, model, cfg, device,
                                                   exp_folder)
     save_predictions(exp_folder, predictions)
-    #if not args.skip_program:
-    #    extract_program(exp_folder, device, model, cfg.derivation_threshold, external_encoder, internal_encoder)
+    if not args.skip_program:
+        extract_program(exp_folder, device, model, cfg.derivation_threshold, external_encoder, internal_encoder)
     explain_facts(exp_folder,predictions,device,model,cfg,trace,external_encoder, internal_encoder, test_graph_dataset)
 
 # TODO: Separate responsabilities better in the test method.

@@ -20,7 +20,7 @@ class EquivalentProgramExtractor:
     def compute_tree_for(self, predicate_position):
         explanation_builder = TreeShapedConjunctionBuilder(self.internal_encoder.get_n_binary_predicates())
         L = self.model.num_layers
-        explanation_builder.add(features=None,level=L,parent=None)
+        explanation_builder.add(features=None,level=L,parent=-1)
         # Companion to basic_explanation. Maps a (var id, layer) to the relevant Feature Mask. This is the paper's \mu.
         initial_mask = BitSet.from_subset(self.internal_encoder.get_n_unary_predicates(),{predicate_position})
         var_layer_mask = {(0, L): initial_mask}
@@ -57,10 +57,11 @@ class EquivalentProgramExtractor:
         pred = self.internal_encoder.unary_pred_position_dict.inverse[predicate_position]
         print("Computing rules for predicate " + pred)
         # Initialisation
-        bottom_node = self.base_tree[predicate_position].initial_compact
+        base_tree = self.base_tree[predicate_position]
+        bottom_node = base_tree.initial_compact
         current_layer = [bottom_node]
         subsumed = {} # Dictionary of nodes that are subsumed already by some smaller sound node
-        if bottom_node.check_soundness(self.device, self.model, self.threshold, predicate_position):
+        if bottom_node.check_soundness(base_tree, self.device, self.model, self.threshold, predicate_position):
             yield bottom_node
             subsumed[bottom_node] = True
         else:
@@ -78,17 +79,17 @@ class EquivalentProgramExtractor:
                 if deadline is not None and time.monotonic() >= deadline:
                     return
                 if not subsumed[x]:
-                    next_layer.update(x.get_successors())
+                    next_layer.update(x.get_successors(base_tree))
             # Process nodes in the next layer.
             new_subsumed = {} # Make a new dictionary to save memory - we don't need 'subsumed' in the next iter
             for x in next_layer:
                 if deadline is not None and time.monotonic() >= deadline:
                     return
-                preds = x.get_predecessors()
+                preds = x.get_predecessors(base_tree)
                 if any(subsumed.get(p, False) for p in preds):
                     new_subsumed[x] = True
                 else:
-                    if x.check_soundness(self.device, self.model, self.threshold, predicate_position):
+                    if x.check_soundness(base_tree, self.device, self.model, self.threshold, predicate_position):
                         new_subsumed[x] = True
                         yield x
                         rule_counter += 1
@@ -99,9 +100,11 @@ class EquivalentProgramExtractor:
             layer_counter += 1
 
     def hail_mary(self, predicate_position):
-        node = self.base_tree[predicate_position].initial_compact
+        base_tree = self.base_tree[predicate_position]
+        node = base_tree.initial_compact
         while True:
             if node.check_soundness(
+                    base_tree,
                     self.device,
                     self.model,
                     self.threshold,
@@ -109,7 +112,7 @@ class EquivalentProgramExtractor:
             ):
                 yield node
                 return
-            node = next(node.get_successors(), None)
+            node = next(node.get_successors(base_tree), None)
             if node is None:
                 return
 
@@ -143,19 +146,16 @@ class EquivalentProgramExtractor:
     def get_all_rules(self, program_file, time_budget):
         with (open(program_file, 'w') as output):
             for pred_pos in range(self.internal_encoder.get_n_unary_predicates()):
-                # TODO undo this if. This is a quick and dirty thing for a specific application.
-                if self.internal_encoder.unary_pred_position_dict.inverse[pred_pos] == "positive":
-                    deadline = time.monotonic() + time_budget if time_budget is not None else None
-                    rules_for_this_predicate = set()
-                    rule_counter = 0
-                    for compressed_rule_body in self.extract_smallest_rules_for(pred_pos, deadline):
-                        rule_counter += 1
+                deadline = time.monotonic() + time_budget if time_budget is not None else None
+                rules_for_this_predicate = set()
+                rule_counter = 0
+                for compressed_rule_body in self.extract_smallest_rules_for(pred_pos, deadline):
+                    rule_counter += 1
+                    self.unfold_and_print_rule(pred_pos, compressed_rule_body, rules_for_this_predicate, output)
+                if rule_counter == 0:
+                    print("Time's up, going for a Hail Mary...")
+                    compressed_rule_body = next(self.hail_mary(pred_pos), None)
+                    if compressed_rule_body is not None:
                         self.unfold_and_print_rule(pred_pos, compressed_rule_body, rules_for_this_predicate, output)
-                    if rule_counter == 0:
-                        print("Time's up, going for a Hail Mary...")
-                        compressed_rule_body = next(self.hail_mary(pred_pos), None)
-                        if compressed_rule_body is not None:
-                            self.unfold_and_print_rule(pred_pos, compressed_rule_body, rules_for_this_predicate, output)
 
-        output.close()
 
