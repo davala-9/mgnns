@@ -115,7 +115,7 @@ class FactExplainer:
                                         threshold=self.threshold,
                                         pred_position=fact_context.cd_fact_pred_pos,
                                         base_tree=rule_body)
-        minimised = optimiser3.minimise_rule()
+        minimised = optimiser3.minimise_rule(optimiser3.greedy_climb_frontier)
         if minimised is not None:  # If no simplification was found in time, keep the original rule_body
             rule_body = rule_body.extract_from_compact(minimised)
         # TODO: this should be a call to the external encoder

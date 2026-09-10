@@ -3,7 +3,8 @@ from typing import Callable
 from src.encodings.canonical import CanonicalEncoderDecoder
 from src.encodings.noncanonical.noncanonical import NonCanonicalEncoder
 from src.rule_extraction.lattice_search import (
-    Frontier, BFSFrontier, SinglePathFrontier, PriorityFrontier, AllMinimalPolicy, FirstResultPolicy, search,
+    Frontier, BFSFrontier, SinglePathFrontier, GreedyBestSuccessorFrontier, AllMinimalPolicy, FirstResultPolicy,
+    search,
 )
 from src.rule_extraction.rule_optimisation_2 import compute_path_weights, path_weight_score_fn
 from src.rule_extraction.tree_shaped_conjunction import TreeShapedConjunction, TreeShapedConjunctionBuilder
@@ -79,11 +80,11 @@ class EquivalentProgramExtractor:
                 self.var_layer_mask[predicate_position], predicate_position)
         return self._atom_weight_cache[predicate_position]
 
-    # A frontier_factory for hail_mary() that greedily follows the highest-weighted atom instead of an
-    # arbitrary one, using the weights above.
+    # A frontier_factory for hail_mary(): a greedy climb (see GreedyBestSuccessorFrontier) guided by the
+    # weights above, instead of following an arbitrary path.
     def hail_mary_frontier(self, predicate_position):
         weights = self.atom_weights(predicate_position)
-        return PriorityFrontier(path_weight_score_fn(self.base_tree[predicate_position], weights))
+        return GreedyBestSuccessorFrontier(path_weight_score_fn(self.base_tree[predicate_position], weights))
 
     # Explores the lattice of subtrees of the base_tree, looking for every inclusion-minimal sound
     # one. Which order the lattice gets explored in is controlled by `frontier_factory` (default:

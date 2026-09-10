@@ -64,9 +64,22 @@ def compute_path_weights(model, rule_body: TreeShapedConjunction, var_layer_mask
     return contributions
 
 
-# Turns compute_path_weights' per-atom weights into a lattice_search.PriorityFrontier score_fn: the
-# score of a CompactSubTree is the sum of the weights of every atom (var_id, pos) it currently includes
-# -- an estimate of how close it is to being sound, without ever having to run the model on it.
+# A var_layer_mask (the paper's \mu) that treats every position at every level as relevant, i.e. applies
+# no pruning at all. Use this to call compute_path_weights on a tree that has no \mu of its own -- e.g.
+# RuleOptimisation3's base_tree, which is already a reduced, renumbered subtree of the original
+# explanation, not the tree \mu was originally computed for.
+def unrestricted_var_layer_mask(model, rule_body: TreeShapedConjunction):
+    return {
+        (var_id, l): BitSet.from_subset(model.layer_dimension(l), set(range(model.layer_dimension(l))))
+        for var_id in range(len(rule_body))
+        for l in range(rule_body.levels[var_id], 0, -1)
+    }
+
+
+# Turns compute_path_weights' per-atom weights into a score_fn for lattice_search's scored frontiers
+# (PriorityFrontier, GreedyBestSuccessorFrontier): the score of a CompactSubTree is the sum of the
+# weights of every atom (var_id, pos) it currently includes -- an estimate of how close it is to being
+# sound, without ever having to run the model on it.
 #
 # Computed incrementally rather than by re-summing every atom from scratch each time: a node always
 # differs from its generating parent by exactly one atom (see CompactSubTree.get_successors), and that

@@ -33,6 +33,29 @@ class SinglePathFrontier:
         return self._item is None
 
 
+class GreedyBestSuccessorFrontier:
+    """Like SinglePathFrontier, a single greedy path climb -- NOT best-first search over the whole
+    lattice. The difference is which successor it commits to: of all the successors of the node just
+    expanded, it keeps only the highest-scoring one (by `score_fn`) and discards the rest right away,
+    so they're never explored. That one successor is then, in turn, expanded the same way -- always one
+    atom added per step, never backtracking to a discarded alternative."""
+    def __init__(self, score_fn: Callable[[CompactSubTree], float]):
+        self._score_fn = score_fn
+        self._best_item: CompactSubTree | None = None
+        self._best_score: float = float("-inf")
+    def push(self, item: CompactSubTree) -> None:
+        score = self._score_fn(item)
+        if self._best_item is None or score > self._best_score:
+            self._best_item, self._best_score = item, score
+    def pop(self) -> CompactSubTree:
+        item = self._best_item
+        assert item is not None
+        self._best_item, self._best_score = None, float("-inf")
+        return item
+    def is_empty(self) -> bool:
+        return self._best_item is None
+
+
 class DFSFrontier:
     def __init__(self):
         self._stack: list[CompactSubTree] = []

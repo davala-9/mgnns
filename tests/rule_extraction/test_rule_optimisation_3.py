@@ -1,9 +1,11 @@
 import time
 import pytest
 
+from src.rule_extraction import rule_optimisation_3 as rule_optimisation_3_module
 from src.rule_extraction.rule_optimisation_3 import (
     DFSFrontier,
     BFSFrontier,
+    GreedyBestSuccessorFrontier,
     RuleOptimisation3,
 )
 
@@ -163,3 +165,49 @@ class TestMinimiseRule:
         opt = optimiser_factory(FakeBaseTree(root))
         result = opt.minimise_rule()
         assert result is None
+
+    def test_accepts_a_custom_fallback_frontier_factory(self, optimiser_factory):
+        # fact_explanation.py passes optimiser3.greedy_climb_frontier here instead of relying on the
+        # default SinglePathFrontier -- confirm the plumbing actually reaches the fallback stage.
+        target = FakeSubtree("target", sound=True)
+        root = FakeSubtree("root", successors=[target], sound=False)
+        opt = optimiser_factory(FakeBaseTree(root))
+        calls = []
+        original_graph_search = opt.graph_search
+        def fake_graph_search(frontier, timeout=None):
+            calls.append(type(frontier).__name__)
+            if isinstance(frontier, BFSFrontier):
+                return None  # simulate a timeout on the first attempt
+            return original_graph_search(frontier, timeout=timeout)
+        opt.graph_search = fake_graph_search
+        result = opt.minimise_rule(fallback_frontier_factory=DFSFrontier)
+        assert result == target
+        assert calls == ["BFSFrontier", "DFSFrontier"]
+
+
+class TestGreedyClimbFrontier:
+    def test_builds_a_greedy_frontier_out_of_atom_weights(self, optimiser_factory, monkeypatch):
+        sentinel_mask, sentinel_weights = {"sentinel-mask": True}, {"sentinel-weights": True}
+        captured = {}
+
+        monkeypatch.setattr(rule_optimisation_3_module, "unrestricted_var_layer_mask",
+                            lambda model, base_tree: sentinel_mask)
+
+        def fake_compute_path_weights(model, base_tree, var_layer_mask, predicate_position):
+            captured["var_layer_mask"] = var_layer_mask
+            return sentinel_weights
+        monkeypatch.setattr(rule_optimisation_3_module, "compute_path_weights", fake_compute_path_weights)
+
+        def fake_path_weight_score_fn(base_tree, weights):
+            captured["base_tree"], captured["weights"] = base_tree, weights
+            return lambda node: 0.0
+        monkeypatch.setattr(rule_optimisation_3_module, "path_weight_score_fn", fake_path_weight_score_fn)
+
+        opt = optimiser_factory(FakeBaseTree(FakeSubtree("root")))
+
+        frontier = opt.greedy_climb_frontier()
+
+        assert isinstance(frontier, GreedyBestSuccessorFrontier)
+        assert captured["var_layer_mask"] is sentinel_mask
+        assert captured["base_tree"] is opt.base_tree
+        assert captured["weights"] is sentinel_weights

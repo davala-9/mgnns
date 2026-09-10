@@ -2,7 +2,7 @@ import time
 
 from src.rule_extraction import full_program as full_program_module
 from src.rule_extraction.full_program import EquivalentProgramExtractor
-from src.rule_extraction.lattice_search import DFSFrontier, PriorityFrontier
+from src.rule_extraction.lattice_search import DFSFrontier, GreedyBestSuccessorFrontier
 
 
 class FakeSubtree:
@@ -127,7 +127,7 @@ class TestAtomWeights:
 
 
 class TestHailMaryFrontier:
-    def test_builds_a_priority_frontier_out_of_atom_weights(self, monkeypatch):
+    def test_builds_a_greedy_frontier_out_of_atom_weights(self, monkeypatch):
         sentinel_weights = {"sentinel": True}
         captured = {}
 
@@ -144,6 +144,6 @@ class TestHailMaryFrontier:
 
         frontier = extractor.hail_mary_frontier(0)
 
-        assert isinstance(frontier, PriorityFrontier)
+        assert isinstance(frontier, GreedyBestSuccessorFrontier)
         assert captured["base_tree"] is extractor.base_tree[0]
         assert captured["weights"] is sentinel_weights

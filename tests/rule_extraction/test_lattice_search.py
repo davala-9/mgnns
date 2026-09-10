@@ -4,6 +4,7 @@ from src.rule_extraction.lattice_search import (
     BFSFrontier,
     PriorityFrontier,
     SinglePathFrontier,
+    GreedyBestSuccessorFrontier,
     FirstResultPolicy,
     AllMinimalPolicy,
     search,
@@ -11,7 +12,8 @@ from src.rule_extraction.lattice_search import (
 
 # BFSFrontier/DFSFrontier are also exercised via tests/rule_extraction/test_rule_optimisation_3.py, which
 # imports them through rule_optimisation_3.py's re-export. This file focuses on what's new here:
-# PriorityFrontier, SinglePathFrontier's single-path commitment, and the search()/policy machinery.
+# PriorityFrontier, SinglePathFrontier's single-path commitment, GreedyBestSuccessorFrontier, and the
+# search()/policy machinery.
 
 
 class FakeSubtree:
@@ -75,6 +77,40 @@ class TestSinglePathFrontier:
         results = list(search(FakeBaseTree(root), counting_check_soundness, SinglePathFrontier(),
                               FirstResultPolicy()))
         assert results == [target]
+
+
+class TestGreedyBestSuccessorFrontier:
+    def test_keeps_the_highest_scored_item_pushed_since_the_last_pop(self):
+        frontier = GreedyBestSuccessorFrontier(score_fn=lambda x: x)
+        frontier.push(3)
+        frontier.push(7)  # new best
+        frontier.push(5)  # lower than the current best -- discarded
+        assert frontier.pop() == 7
+
+    def test_pop_resets_state_so_the_next_node_starts_a_fresh_comparison(self):
+        frontier = GreedyBestSuccessorFrontier(score_fn=lambda x: x)
+        frontier.push(10)
+        frontier.pop()
+        assert frontier.is_empty()
+        frontier.push(1)  # not discarded just because it's lower than the previous round's best
+        assert frontier.pop() == 1
+
+    def test_search_always_follows_the_best_successor_never_backtracking_to_the_rest(self):
+        # A node with three successors of differing quality: the search must commit to the best one
+        # (worst_first_choice, despite being pushed first) and never fall back to a discarded sibling,
+        # even though that sibling (better_but_discarded) would itself have led to a sound node.
+        discarded_dead_end = FakeSubtree("discarded_dead_end", sound=False)
+        better_but_discarded = FakeSubtree("better_but_discarded", successors=[discarded_dead_end], sound=False)
+        sound_target = FakeSubtree("sound_target", sound=True)
+        best_first_choice = FakeSubtree("best_first_choice", successors=[sound_target], sound=False)
+        root = FakeSubtree("root", successors=[better_but_discarded, best_first_choice], sound=False)
+
+        score = {root: 0, better_but_discarded: 5, best_first_choice: 10, sound_target: 0, discarded_dead_end: 0}
+        results = list(search(FakeBaseTree(root), counting_check_soundness,
+                              GreedyBestSuccessorFrontier(score_fn=score.__getitem__), FirstResultPolicy()))
+
+        assert results == [sound_target]
+        assert better_but_discarded.soundness_calls == 0  # never even checked, let alone expanded
 
 
 class TestPriorityFrontier:

@@ -7,7 +7,9 @@ from src.model.cd_graph import TraceCollector, CDGraph
 from src.model.gnn_architectures import GNN
 from src.model.gnn_transformation import apply_model
 from src.rule_extraction.fact_explanation import FactExplainer, FactContext
-from src.rule_extraction.rule_optimisation_2 import apply_optimisation, compute_path_weights, path_weight_score_fn
+from src.rule_extraction.rule_optimisation_2 import (
+    apply_optimisation, compute_path_weights, path_weight_score_fn, unrestricted_var_layer_mask,
+)
 from src.rule_extraction.tree_shaped_conjunction import TreeShapedConjunction, TreeShapedConjunctionBuilder
 from src.utils.bitset import BitSet
 from src.utils.utils import TYPE_PRED
@@ -150,6 +152,39 @@ def make_tiny_base_tree():
     builder.add(features=BitSet.from_subset(2, {0, 1}), level=1, parent=-1)
     builder.add(features=BitSet.from_subset(1, {0}), level=0, parent=0, edge=(1, 0, 0))
     return builder.build()
+
+
+# ----------------------------------------------------------------------------------------------------------
+# unrestricted_var_layer_mask: no real model needed -- it only ever calls model.layer_dimension(l).
+# ----------------------------------------------------------------------------------------------------------
+
+class FakeModelWithLayerDimensions:
+    def __init__(self, dimensions: dict[int, int]):
+        self._dimensions = dimensions
+
+    def layer_dimension(self, l):
+        return self._dimensions[l]
+
+
+def test_unrestricted_var_layer_mask_covers_exactly_what_compute_path_weights_needs():
+    base_tree = make_tiny_base_tree()  # root (var 0, level 1), one child (var 1, level 0)
+    mask = unrestricted_var_layer_mask(FakeModelWithLayerDimensions({0: 2, 1: 3}), base_tree)
+    # var 0 needs its own level down to 1: just {1}. var 1's own level is already 0, so it needs none
+    # (compute_path_weights never looks up var_layer_mask for a var that starts out at layer 0).
+    assert set(mask.keys()) == {(0, 1)}
+    assert mask[(0, 1)].elements() == [0, 1, 2]  # every position at layer 1, unrestricted
+
+
+def test_unrestricted_var_layer_mask_works_as_a_drop_in_for_a_real_model_and_tree():
+    # This is what RuleOptimisation3.greedy_climb_frontier does when base_tree has no \mu of its own.
+    fe = make_mock_fe_1()
+    fact_context, rule_body, _, _ = get_basic_explanation_ex1(fe)
+    mask = unrestricted_var_layer_mask(fe.model, rule_body)
+    weights = compute_path_weights(fe.model, rule_body, mask, fact_context.cd_fact_pred_pos)
+    expected_atoms = {
+        (var_id, pos) for var_id in range(len(rule_body)) for pos in rule_body.features[var_id].elements()
+    }
+    assert set(weights.keys()) == expected_atoms
 
 
 def test_path_weight_score_fn_root_scores_zero():
