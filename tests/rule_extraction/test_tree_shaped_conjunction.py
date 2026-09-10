@@ -254,6 +254,33 @@ def test_compact_subtree_deduplicates_in_a_set():
     assert len({a, b}) == 1
 
 
+# --- CompactSubTree.is_superset_of ---
+
+def test_is_superset_of_itself():
+    a = CompactSubTree(var_ids=(0, 1), masks=(BitSet.from_subset(1, {0}), BitSet.from_subset(1, set())))
+    assert a.is_superset_of(a)
+
+def test_is_superset_of_missing_node_is_false():
+    a = CompactSubTree(var_ids=(0,), masks=(BitSet.from_subset(1, {0}),))
+    b = CompactSubTree(var_ids=(0, 1), masks=(BitSet.from_subset(1, {0}), BitSet.from_subset(2, {0})))
+    assert not a.is_superset_of(b)  # a lacks node 1 that b has
+
+def test_is_superset_of_extra_node_is_true():
+    a = CompactSubTree(var_ids=(0, 1), masks=(BitSet.from_subset(1, {0}), BitSet.from_subset(2, {0})))
+    b = CompactSubTree(var_ids=(0,), masks=(BitSet.from_subset(1, {0}),))
+    assert a.is_superset_of(b)  # a has everything b has, plus node 1
+
+def test_is_superset_of_false_when_shared_node_mask_is_smaller():
+    a = CompactSubTree(var_ids=(0,), masks=(BitSet.from_subset(2, {0}),))
+    b = CompactSubTree(var_ids=(0,), masks=(BitSet.from_subset(2, {0, 1}),))
+    assert not a.is_superset_of(b)  # a's mask for node 0 is missing bit 1 that b has
+
+def test_is_superset_of_true_when_shared_node_mask_is_larger():
+    a = CompactSubTree(var_ids=(0,), masks=(BitSet.from_subset(2, {0, 1}),))
+    b = CompactSubTree(var_ids=(0,), masks=(BitSet.from_subset(2, {0}),))
+    assert a.is_superset_of(b)
+
+
 # --- from_subtree ---
 
 def test_from_subtree_closes_under_ancestors():

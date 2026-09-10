@@ -128,13 +128,16 @@ def save_predictions(ef, predictions):
             output2.write("{}\t{}\t{}\t{}\n".format(s, p, o, score))
     output.close()
 
-def extract_program(ef, device, model, threshold, external_encoder, internal_encoder):
+def extract_program(ef, device, model, threshold, external_encoder, internal_encoder, predicate=None):
     print("Computing full equivalent program...")
     program_file = ef / "program.txt"
     program_extractor = EquivalentProgramExtractor(device, model, threshold, external_encoder,
                                                    internal_encoder)
-    program_extractor.compute_all_upper_bounds()
-    program_extractor.get_all_rules(program_file, 30)
+    predicate_positions = None
+    if predicate is not None:
+        predicate_positions = [program_extractor.resolve_predicate_position(predicate)]
+    program_extractor.compute_all_upper_bounds(predicate_positions)
+    program_extractor.get_all_rules(program_file, 3, predicate_positions)
 
 def explain_facts(ef,predictions,device,model,cfg,trace,external_encoder, internal_encoder, test_graph_dataset):
     print("Computing prediction explanations...")

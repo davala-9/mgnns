@@ -13,27 +13,11 @@ if TYPE_CHECKING:  # avoid a circular import: fact_explanation.py imports this m
 
 
 # OPTIMISATION 2
-# Ported from the old (rule_optimisation_2_old.py) 2-layer/ReLU-only implementation, which computed an
-# *analytic* influence value for each candidate atom -- the product of weight-matrix entries along the
-# path connecting that atom to the head prediction -- instead of grounding and running the model per
-# atom (as Optimisation 1 does). Atoms are then greedily added in decreasing order of this weight until
-# the threshold is met, exactly like Optimisation 1's second phase.
-#
-# The old code assumed every variable is tied to a single scalar feature position at a time, so "multiply
-# two matrix entries" was unambiguous. The new BasicExplanation tree (built by get_basic_explanation) is
-# more general: a variable's relevant positions at a layer are a BitSet that can hold several bits at
-# once (var_layer_mask), since backpropagate_relevance aggregates "any positive row" across every
-# relevant position of its parent rather than tracking a single position-to-position link. So instead of
-# a flat product of two scalars, we propagate a full analytic WEIGHT VECTOR down through the tree: each
-# hop distributes the upstream weight across every matrix entry from a relevant row, and multiple
-# contributing rows are summed (weighted by their own upstream magnitude, not treated as equally-weighted
-# 1s). This reduces to the exact old formula whenever a hop has a single relevant position (the common
-# case, since a variable's own relevant position at its creation layer is always a single bit), and is
-# the direct generalisation of what the old code already did for its own multi-path case (its own
-# comment: "where col2 is -1 there might be multiple influence paths -- we sum them here").
+# Computes an *analytic* influence value for each candidate atom: the product of weight-matrix entries along the
+# path connecting that atom to the head prediction. Atoms are then greedily added in decreasing order of this weight
+# until the threshold is met.
 
-
-def _compute_path_weights(model, rule_body: TreeShapedConjunction, var_layer_mask, predicate_position: int):
+def compute_path_weights(model, rule_body: TreeShapedConjunction, var_layer_mask, predicate_position: int):
     """Returns {(var_id, pos): weight} for every atom (var_id, pos) in rule_body, where `weight` is the
     analytic, weight-product-based contribution of that atom to the head prediction position, computed
     without running the model."""
@@ -80,12 +64,45 @@ def _compute_path_weights(model, rule_body: TreeShapedConjunction, var_layer_mas
     return contributions
 
 
+# Turns compute_path_weights' per-atom weights into a lattice_search.PriorityFrontier score_fn: the
+# score of a CompactSubTree is the sum of the weights of every atom (var_id, pos) it currently includes
+# -- an estimate of how close it is to being sound, without ever having to run the model on it.
+#
+# Computed incrementally rather than by re-summing every atom from scratch each time: a node always
+# differs from its generating parent by exactly one atom (see CompactSubTree.get_successors), and that
+# parent is always among the node's get_predecessors() (get_successors/get_predecessors are inverses),
+# so we can recover the parent's already-cached score and just add the one new atom's weight to it.
+def path_weight_score_fn(base_tree: TreeShapedConjunction, weights: dict[tuple[int, int], float]):
+    cache = {base_tree.initial_compact: 0.0}  # the empty rule body includes no atoms, so it scores 0
+
+    def score(node):
+        if node not in cache:
+            scored_predecessor = next((p for p in node.get_predecessors(base_tree) if p in cache), None)
+            assert scored_predecessor is not None, "score() must be called in search() traversal order"
+            cache[node] = cache[scored_predecessor] + _new_atom_weight(base_tree, weights, scored_predecessor, node)
+        return cache[node]
+
+    return score
+
+
+# The weight of the single atom present in `node` but not in `predecessor`.
+def _new_atom_weight(base_tree, weights, predecessor, node):
+    if len(node.var_ids) != len(predecessor.var_ids):
+        return 0.0  # a freshly added child always starts out with an empty mask -- nothing to weigh yet
+    for var_id, old_mask, new_mask in zip(node.var_ids, predecessor.masks, node.masks):
+        if old_mask != new_mask:
+            new_compact_pos = (set(new_mask.elements()) - set(old_mask.elements())).pop()
+            real_pos = base_tree.features[var_id].elements()[new_compact_pos]
+            return weights.get((var_id, real_pos), 0.0)
+    raise AssertionError("node is identical to predecessor")
+
+
 def apply_optimisation(fe: FactExplainer, rule_body: TreeShapedConjunction, predicate_position: int,
                         var_layer_mask):
     assert fe.model.num_layers == 2 and fe.model.activation(1) is torch.relu, \
         "Optimisation 2's analytic weight-product approximation is only meaningful for a 2-layer ReLU model"
 
-    contributions = _compute_path_weights(fe.model, rule_body, var_layer_mask, predicate_position)
+    contributions = compute_path_weights(fe.model, rule_body, var_layer_mask, predicate_position)
 
     # Sort candidate atoms by increasing analytic weight; pop() from the end to try the most
     # strongly-weighted atoms first.

@@ -12,6 +12,8 @@ if __name__ == "__main__":
     parser.add_argument("input", help='Path of the folder where we have model & encoders')
     parser.add_argument("threshold", type=float, help='Fact derivation threshold')
     parser.add_argument("output", help='Path of the folder where we will save the output')
+    parser.add_argument("--predicate", help='Only extract rules whose head is this predicate. '
+                                             'If omitted, extracts rules for all predicates.')
     args = parser.parse_args()
 
     ef = Path(args.output)
@@ -20,7 +22,7 @@ if __name__ == "__main__":
     encoder_scheme = EncoderType.CANONICAL
     external_encoder, internal_encoder = load_encoder(args.input, encoder_scheme)
 
-    extract_program(ef,device,model,args.threshold,external_encoder,internal_encoder)
+    extract_program(ef,device,model,args.threshold,external_encoder,internal_encoder,args.predicate)
 
 
 

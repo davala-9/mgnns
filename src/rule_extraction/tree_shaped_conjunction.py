@@ -201,6 +201,20 @@ class CompactSubTree:
             yield CompactSubTree(self.var_ids[:index] + self.var_ids[index + 1:],
                                  self.masks[:index] + self.masks[index + 1:])
 
+    # Whether this subtree includes every node/bit of 'other' (and possibly more).
+    # Both subtrees must be compact w.r.t. the same base_tree for the masks to be comparable.
+    def is_superset_of(self, other: "CompactSubTree") -> bool:
+        i = 0  # index into self.var_ids, advanced in step with other.var_ids (both sorted ascending)
+        for var_id, other_mask in zip(other.var_ids, other.masks):
+            while i < len(self.var_ids) and self.var_ids[i] < var_id:
+                i += 1
+            if i >= len(self.var_ids) or self.var_ids[i] != var_id:
+                return False
+            if not other_mask.subsetOf(self.masks[i]):
+                return False
+            i += 1
+        return True
+
     def check_soundness(self, base_tree, device, model, threshold, pred_position):
         input_graph = base_tree.as_cd_graph.clone()
         input_graph.features =  torch.zeros_like(input_graph.features) # Return all features to zero, like GER

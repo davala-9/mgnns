@@ -1,75 +1,27 @@
-from src.rule_extraction.tree_shaped_conjunction import TreeShapedConjunction, CompactSubTree
-from typing import Protocol
-from collections import deque
 import time
 
-# Try to implement in a way that does not allow duplicates, please
-class Frontier(Protocol):
-    def push(self, item: CompactSubTree) -> None: ...
-    def pop(self) -> CompactSubTree: ...
-    def is_empty(self) -> bool: ...
-
-class SinglePathFrontier:
-    def __init__(self):
-        self._item: CompactSubTree | None = None
-    def push(self, item: CompactSubTree) -> None:
-        self._item = item
-    def pop(self) -> CompactSubTree:
-        item = self._item
-        self._item = None
-        assert item is not None
-        return item
-    def is_empty(self) -> bool:
-        return self._item is None
-
-# Currently not in use, but might come in handy to explore alternative strategies.
-class DFSFrontier:
-    def __init__(self):
-        self._stack: list[CompactSubTree] = []
-    def push(self, item: CompactSubTree) -> None:
-        self._stack.append(item)
-    def pop(self) -> CompactSubTree:
-        return self._stack.pop()
-    def is_empty(self) -> bool:
-        return len(self._stack) == 0
-
-class BFSFrontier:
-    def __init__(self):
-        self._queue: deque[CompactSubTree] = deque()
-    def push(self, item: CompactSubTree) -> None:
-        self._queue.append(item)
-    def pop(self) -> CompactSubTree:
-        return self._queue.popleft()
-    def is_empty(self) -> bool:
-        return len(self._queue) == 0
+from src.rule_extraction.lattice_search import (
+    Frontier, SinglePathFrontier, DFSFrontier, BFSFrontier, FirstResultPolicy, search,
+)
+from src.rule_extraction.tree_shaped_conjunction import TreeShapedConjunction
 
 # Takes a TreeShapedConjunction and attempts to find a minimal sound subtree, as another #TreeShapedConjunction.
 # It spends some amount of time trying minimal extraction with BFS, then it gives up and uses greedy path climb.
 class RuleOptimisation3:
 
-    def __init__(self, device, model, threshold, pred_position, base_tree:TreeShapedConjunction):
+    def __init__(self, device, model, threshold, pred_position, base_tree: TreeShapedConjunction):
         self.device = device
         self.model = model
         self.threshold = threshold
         self.pred_position = pred_position
         self.base_tree = base_tree
 
+    def _check_soundness(self, node):
+        return node.check_soundness(self.base_tree, self.device, self.model, self.threshold, self.pred_position)
+
     def graph_search(self, frontier: Frontier, timeout: float | None = None):
-        start = time.monotonic()
-        root = self.base_tree.initial_compact
-        seen = {root} # Dedup at push time, so we never enqueue a node we've already discovered
-        frontier.push(root)
-        while not frontier.is_empty():
-            if timeout is not None and time.monotonic() - start > timeout:
-                return None
-            subtree = frontier.pop()
-            if subtree.check_soundness(self.base_tree,self.device,self.model,self.threshold,self.pred_position):
-                return subtree
-            for successor in subtree.get_successors(self.base_tree):
-                if successor not in seen:
-                    seen.add(successor)
-                    frontier.push(successor)
-        return None
+        deadline = time.monotonic() + timeout if timeout is not None else None
+        return next(search(self.base_tree, self._check_soundness, frontier, FirstResultPolicy(), deadline), None)
 
     # Returns a minimal compact subtree
     def minimise_rule(self):
