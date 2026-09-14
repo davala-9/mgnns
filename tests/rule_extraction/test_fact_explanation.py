@@ -1,3 +1,5 @@
+import time
+
 import numpy as np
 import torch
 import pytest
@@ -384,12 +386,36 @@ class TestFactExplainer:
         assert var_layer_mask[(vz, 0)] == BitSet.from_subset(2, {0})
 
     def test_fact_explainer_ex1(self):
+        # example_model_1's derivation genuinely needs BOTH neighbours (per test_basic_explanation_ex1:
+        # feature 1 of layer 2 requires an S-neighbour AND an R-neighbour with feature 1), so neither
+        # binary atom can be dropped without becoming unsound. If extracted rules were ever collapsing
+        # down to a single binary atom (a real regression reported against a real dataset), a fixture
+        # like this -- which structurally cannot be explained by one edge alone -- is what would catch it.
         fe = make_mock_fe_1()
         rule = fe.explain_fact(get_fact_ex1())
         head, body = rule.rstrip(' .\n').split(' :- ')
         body_atoms = set(body.split(', '))
         assert head ==  "<A>[?X0]"
         assert body_atoms == {"<A>[?X0]", "<S>[?X1,?X0]", "<A>[?X1]", "<R>[?X2,?X0]", "<A>[?X2]"}
+        # Two DISTINCT binary atoms, over two DIFFERENT predicates, both required:
+        binary_atoms = {a for a in body_atoms if ',' in a}
+        assert binary_atoms == {"<S>[?X1,?X0]", "<R>[?X2,?X0]"}
+
+    def test_fact_explainer_ex1_still_finds_both_binary_atoms_via_the_greedy_climb_fallback(self, monkeypatch):
+        # Same fixture as above, but forces RuleOptimisation3.minimise_rule's BFS stage to time out
+        # immediately, so this exercises the GreedyBestSuccessorFrontier fallback (see greedy_climb_frontier
+        # in rule_optimisation_3.py) against a REAL model -- previously only ever tested against a mocked
+        # score_fn (test_rule_optimisation_3.py::TestGreedyClimbFrontier), never end-to-end like this.
+        times = iter([time.monotonic()])  # first call (computing the 120s deadline) is real...
+        monkeypatch.setattr(time, "monotonic", lambda: next(times, float("inf")))  # ...every call after: timed out
+
+        fe = make_mock_fe_1()
+        rule = fe.explain_fact(get_fact_ex1())
+        head, body = rule.rstrip(' .\n').split(' :- ')
+        body_atoms = set(body.split(', '))
+        assert head == "<A>[?X0]"
+        binary_atoms = {a for a in body_atoms if ',' in a}
+        assert binary_atoms == {"<S>[?X1,?X0]", "<R>[?X2,?X0]"}
 
 
     def test_initialisation_ex2(self):
