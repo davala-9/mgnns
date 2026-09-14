@@ -15,12 +15,18 @@ import time
 class EquivalentProgramExtractor:
 
     def __init__(self, device, model, threshold, external_encoder: NonCanonicalEncoder,
-                 internal_encoder: CanonicalEncoderDecoder):
+                 internal_encoder: CanonicalEncoderDecoder, candidate_filters: list[Callable] = None):
         self.device = device
         self.model = model
         self.threshold = threshold
         self.external_encoder = external_encoder
         self.internal_encoder = internal_encoder
+        # Each filter: (builder, var_id, colour, level, mask, internal_encoder, predicate_position) -> mask,
+        # applied in order in compute_tree_for to narrow relevant-position masks before they're used, either
+        # for var_id's own features (colour=None) or for children spawned from var_id via colour. Always
+        # includes whatever the encoding itself wants (see NonCanonicalEncoder.default_candidate_filters);
+        # candidate_filters, if given, adds to those rather than replacing them.
+        self.candidate_filters = external_encoder.default_candidate_filters() + (candidate_filters or [])
         self.base_tree: dict[int, TreeShapedConjunction] = {}
         self.var_layer_mask: dict[int, dict] = {}  # needed to compute atom_weights() for the Hail Mary heuristic
         self._atom_weight_cache: dict[int, dict] = {}
@@ -41,10 +47,18 @@ class EquivalentProgramExtractor:
             for var_id in range(num_vars):
                 var_layer_mask[(var_id, l - 1)] =\
                     backpropagate_relevance(var_layer_mask[(var_id, l)], self.model.matrix_A(l))
+                for f in self.candidate_filters: # Filter any irrelevant positions using known information
+                    var_layer_mask[(var_id, l - 1)] = f(explanation_builder, var_id, None, l - 1,
+                                                        var_layer_mask[(var_id, l - 1)],
+                                                        self.internal_encoder, predicate_position)
                 # Introduce children new variables for var and define their relevant positions
                 for colour in self.internal_encoder.get_colours():
-                    for j in backpropagate_relevance(var_layer_mask[(var_id, l)],
-                                                     self.model.matrix_B(l, colour)).elements():
+                    candidates = backpropagate_relevance(var_layer_mask[(var_id, l)],
+                                                         self.model.matrix_B(l, colour))
+                    for f in self.candidate_filters: # Filter any irrelevant positions using known information
+                        candidates = f(explanation_builder, var_id, colour, l - 1, candidates,
+                                       self.internal_encoder, predicate_position)
+                    for j in candidates.elements():
                         new_var_id = (
                             explanation_builder.add(features=None, level=l - 1, parent=var_id, edge=(l, colour, j)))
                         var_layer_mask[(new_var_id, l - 1)] = \

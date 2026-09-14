@@ -10,7 +10,7 @@ from functools import cached_property
 class TreeShapedConjunctionBuilder:
     def __init__(self, n_colours):
         self.n_colours = n_colours
-        self.features, self.levels, self.children, self.parent = [], [], [], []
+        self.features, self.levels, self.children, self.parent, self.edge_in = [], [], [], [], []
 
     def add(self, features, level, parent=-1, edge=None):
         i = self.num_vars() # new id equals current num of variables e.g. id 3 for current nodes 0, 1, 2
@@ -18,6 +18,7 @@ class TreeShapedConjunctionBuilder:
         self.levels.append(level)
         self.children.append({})
         self.parent.append(parent)
+        self.edge_in.append(edge)  # incoming edge (l, colour, j), or None for the root
         if parent >= 0:
             self.children[parent][edge] = i
         return i

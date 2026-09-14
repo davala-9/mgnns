@@ -5,6 +5,7 @@ from src.encodings.noncanonical.noncanonical import NonCanonicalEncoder, GroundC
 from bidict import bidict
 
 from src.rule_extraction.tree_shaped_conjunction import TreeShapedConjunction
+from src.utils.bitset import BitSet
 from src.utils.utils import TYPE_PRED
 
 # TODO: create accessors in TreeShapedConjunction so that this ICLR class (and other encoder/decoders) know nothing
@@ -17,6 +18,9 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
 
     # This is a placeholder predicate used for unfoldings. It simply says "these two appear together in the dataset"
     TOP_PREDICATE = "top-pred"
+
+    # A canonical variable's structural role: PAIR stands for a constant pair, SINGLE for one constant.
+    PAIR, SINGLE = "pair", "single"
 
     def __init__(self, load_from_document=None, unary_predicates=None, binary_predicates=None):
         self.canonical_binary_predicates = [self.col1, self.col2, self.col3, self.col4]
@@ -46,6 +50,11 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
         # Maps pairs of constants to a new single term
         self.pair_term_dict = bidict()
         self.canonical_unary_predicates = list(self.data_pred_to_unary_canonical.inverse.keys())
+        # Arity, in the DATA signature, of canonical_unary_predicates[i] -- i.e. of whichever position
+        # CanonicalEncoderDecoder assigns it, since it assigns positions by enumerating this same list.
+        self.position_arity = [
+            self.unary_can_predicate_to_data_predicate_arity(p) for p in self.canonical_unary_predicates
+        ]
 
     # Save format (predicate \t new_predicate \t arity)
     def save_to_file(self, target_file):
@@ -113,6 +122,10 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
         return self.data_pred_to_arity[
             self.data_pred_to_unary_canonical.inverse[predicate]]
 
+    # The arity, in the data signature, of the predicate that lives at this canonical unary predicate position.
+    def arity_of_position(self, position: int) -> int:
+        return self.position_arity[position]
+
     def decode_dataset(self, canonical_dataset):
         return {decoded for s, p, o in canonical_dataset
                 if (decoded := self.decode_fact(s, p, o)) is not None}
@@ -141,6 +154,67 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
                 (b, self.col2, ab), (ab, self.col2, b), (a, self.col2, ba), (ba, self.col2, a),
                 (ab, self.col3, ba), (ba, self.col3, ab),
                 (a, self.col4, b), (b, self.col4, a)]
+
+    # Given a variable's role and the colour of an edge leaving it, returns the role its child via that
+    # edge must have, or None if the encoding never connects that role to anything via that colour.
+    def _child_role(self, role, bin_pred):
+        if role == self.PAIR:
+            if bin_pred == self.col1: return self.SINGLE
+            if bin_pred == self.col2: return self.SINGLE
+            if bin_pred == self.col3: return self.PAIR
+            return None  # col4: a pair is never connected to anything via col4
+        else:  # role == self.SINGLE
+            if bin_pred == self.col1: return self.PAIR
+            if bin_pred == self.col2: return self.PAIR
+            if bin_pred == self.col4: return self.SINGLE
+            return None  # col3: a single is never connected to anything via col3
+
+    # The role of var_id, found by walking up to the root and propagating roles back down via _child_role.
+    def _role_of(self, builder, var_id, internal_encoder, root_role):
+        if var_id == 0:
+            return root_role
+        parent_role = self._role_of(builder, builder.parent[var_id], internal_encoder, root_role)
+        _, colour, _ = builder.edge_in[var_id]
+        bin_pred = internal_encoder.binary_pred_colour_dict.inverse[colour]
+        return self._child_role(parent_role, bin_pred)
+
+    # The role of the tree's root, fixed by the arity (in the data signature) of predicate_position itself.
+    def _root_role(self, predicate_position):
+        return self.PAIR if self.position_arity[predicate_position] == 2 else self.SINGLE
+
+    # A candidate filter (see EquivalentProgramExtractor.candidate_filters): rules out spawning any child
+    # via a colour that the encoding never connects to var_id's role. A no-op on var_id's own features
+    # (colour=None) -- this check is purely about which EDGES are legal, not which features are.
+    def filter_children_by_variable_role(self, builder, var_id, colour, level, mask, internal_encoder,
+                                          predicate_position):
+        if colour is None:
+            return mask
+        role = self._role_of(builder, var_id, internal_encoder, self._root_role(predicate_position))
+        bin_pred = internal_encoder.binary_pred_colour_dict.inverse[colour]
+        if self._child_role(role, bin_pred) is None:
+            return BitSet(mask.dimension, 0)
+        return mask
+
+    # A candidate filter (see EquivalentProgramExtractor.candidate_filters): only at level 0, where
+    # positions are actual canonical unary predicates, restricts them to the arity matching the relevant
+    # variable's role -- var_id's own role for its features (colour=None), or the CHILD's role (var_id's
+    # role propagated through colour) for candidates about to become new children via colour.
+    def filter_features_by_data_arity(self, builder, var_id, colour, level, mask, internal_encoder,
+                                       predicate_position):
+        if level != 0:
+            return mask
+        role = self._role_of(builder, var_id, internal_encoder, self._root_role(predicate_position))
+        if colour is not None:
+            bin_pred = internal_encoder.binary_pred_colour_dict.inverse[colour]
+            role = self._child_role(role, bin_pred)
+            if role is None:
+                return BitSet(mask.dimension, 0)  # already excluded by filter_children_by_variable_role
+        expected_arity = 2 if role == self.PAIR else 1
+        kept = {p for p in mask.elements() if self.position_arity[p] == expected_arity}
+        return BitSet.from_subset(mask.dimension, kept)
+
+    def default_candidate_filters(self) -> list:
+        return [self.filter_children_by_variable_role, self.filter_features_by_data_arity]
 
     # Builds the rule head tuple, in either binary or unary (type-fact) shape.
     def make_head(self, root_variables, head_predicate, head_is_binary):
