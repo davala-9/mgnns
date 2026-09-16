@@ -100,32 +100,38 @@ def test_make_head(encoder):
 def test_typed_constraint(encoder):
     # canonical_unary_predicates = ["A", "unary-for-R"], with data arities 1 and 2 respectively.
     tc = encoder.typed_constraint()
+    # Constraints store actual positions/colours (ints), not predicate names -- translate the same way.
+    unary_position = {p: i for i, p in enumerate(encoder.canonical_unary_predicates)}
+    colour_of = {p: i for i, p in enumerate(encoder.canonical_binary_predicates)}
 
     assert tc.types == {encoder.SINGLE, encoder.PAIR}
 
     # SINGLE nodes never carry a feature that came from a binary data predicate, and vice versa.
-    assert tc.get_feature_constraints(encoder.SINGLE).always_zero == {"unary-for-R"}
-    assert tc.get_feature_constraints(encoder.PAIR).always_zero == {"A"}
+    assert tc.get_feature_constraints(encoder.SINGLE).always_zero == {unary_position["unary-for-R"]}
+    assert tc.get_feature_constraints(encoder.PAIR).always_zero == {unary_position["A"]}
 
     # SINGLE-SINGLE: only col4 edges are allowed.
     single_single = tc.get_edge_constraints(encoder.SINGLE, encoder.SINGLE)
-    assert single_single.always_zero == {encoder.col1, encoder.col2, encoder.col3}
+    assert single_single.always_zero == {colour_of[encoder.col1], colour_of[encoder.col2], colour_of[encoder.col3]}
     assert single_single.always_one == set()
 
     # SINGLE-PAIR: only col1/col2 edges are allowed.
     single_pair = tc.get_edge_constraints(encoder.SINGLE, encoder.PAIR)
-    assert single_pair.always_zero == {encoder.col3, encoder.col4}
+    assert single_pair.always_zero == {colour_of[encoder.col3], colour_of[encoder.col4]}
     assert single_pair.always_one == set()
 
     # PAIR-SINGLE: exactly one col1 edge, exactly one col2 edge, nothing else.
     pair_single = tc.get_edge_constraints(encoder.PAIR, encoder.SINGLE)
-    assert pair_single.always_one == {encoder.col1, encoder.col2}
-    assert pair_single.always_zero == {encoder.col3, encoder.col4}
+    assert pair_single.always_one == {colour_of[encoder.col1], colour_of[encoder.col2]}
+    assert pair_single.always_zero == {colour_of[encoder.col3], colour_of[encoder.col4]}
 
-    # PAIR-PAIR: exactly one col3 edge, no other constraints.
+    # PAIR-PAIR: exactly one col3 edge, no other colours allowed.
     pair_pair = tc.get_edge_constraints(encoder.PAIR, encoder.PAIR)
-    assert pair_pair.always_one == {encoder.col3}
-    assert pair_pair.always_zero == set()
+    assert pair_pair.always_one == {colour_of[encoder.col3]}
+    assert pair_pair.always_zero == {colour_of[encoder.col1], colour_of[encoder.col2], colour_of[encoder.col4]}
+
+    # A PAIR never has a col4 neighbour of any type -- neither PAIR-SINGLE nor PAIR-PAIR allows it.
+    assert tc.may_have_neighbour_of_colour(encoder.PAIR, colour_of[encoder.col4]) is False
 
 
 def test_decode_binary_fact(encoder):

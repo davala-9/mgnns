@@ -30,4 +30,9 @@ def adni_constraint(unary_pred_to_position: dict, binary_pred_to_colour: dict) -
         NONROOT, NONROOT, *(binary_pred_to_colour[p] for p in NONROOT_NONROOT_COLOUR_PREDICATES)
     )
 
+    # A child is always NONROOT, regardless of its parent's type or the edge's colour.
+    for colour in binary_pred_to_colour.values():
+        tc.set_child_type(ROOT, colour, NONROOT)
+        tc.set_child_type(NONROOT, colour, NONROOT)
+
     return tc

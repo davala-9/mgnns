@@ -219,26 +219,37 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
 
     # The TypedConstraint describing this encoding's structure: SINGLE nodes represent one data constant,
     # PAIR nodes represent a pair of them. Mirrors _child_role/filter_features_by_data_arity, but as
-    # declarative data.
+    # declarative data. Feature/edge constraints store actual positions/colours (ints), not predicate
+    # names, so they can be used directly against a BitSet.
     def typed_constraint(self) -> TypedConstraint:
         tc = TypedConstraint({self.SINGLE, self.PAIR})
 
-        binary_arity_predicates = [p for p, arity in zip(self.canonical_unary_predicates, self.position_arity)
-                                    if arity == 2]
-        unary_arity_predicates = [p for p, arity in zip(self.canonical_unary_predicates, self.position_arity)
-                                   if arity == 1]
-        tc.set_features_always_zero(self.SINGLE, *binary_arity_predicates)
-        tc.set_features_always_zero(self.PAIR, *unary_arity_predicates)
+        tc.set_features_always_zero(self.SINGLE, *(i for i, arity in enumerate(self.position_arity) if arity == 2))
+        tc.set_features_always_zero(self.PAIR, *(i for i, arity in enumerate(self.position_arity) if arity == 1))
+
+        # Translates a binary predicate name (col1..col4) into its colour (its position in canonical_binary_predicates).
+        colour_of = {predicate: colour for colour, predicate in enumerate(self.canonical_binary_predicates)}
 
         for colour in (self.col1, self.col2, self.col3):
-            tc.set_edge_never_exists(self.SINGLE, self.SINGLE, colour)
+            tc.set_edge_never_exists(self.SINGLE, self.SINGLE, colour_of[colour])
         for colour in (self.col3, self.col4):
-            tc.set_edge_never_exists(self.SINGLE, self.PAIR, colour)
-        tc.set_edge_always_one(self.PAIR, self.SINGLE, self.col1)
-        tc.set_edge_always_one(self.PAIR, self.SINGLE, self.col2)
+            tc.set_edge_never_exists(self.SINGLE, self.PAIR, colour_of[colour])
+        tc.set_edge_always_one(self.PAIR, self.SINGLE, colour_of[self.col1])
+        tc.set_edge_always_one(self.PAIR, self.SINGLE, colour_of[self.col2])
         for colour in (self.col3, self.col4):
-            tc.set_edge_never_exists(self.PAIR, self.SINGLE, colour)
-        tc.set_edge_always_one(self.PAIR, self.PAIR, self.col3)
+            tc.set_edge_never_exists(self.PAIR, self.SINGLE, colour_of[colour])
+        tc.set_edge_always_one(self.PAIR, self.PAIR, colour_of[self.col3])
+        for colour in (self.col1, self.col2, self.col4):
+            tc.set_edge_never_exists(self.PAIR, self.PAIR, colour_of[colour])
+
+        # Mirrors _child_role: a SINGLE's children via col1/col2 are PAIR, via col4 are SINGLE (col3 never
+        # gives a child). A PAIR's children via col1/col2 are SINGLE, via col3 are PAIR (col4 never gives one).
+        tc.set_child_type(self.SINGLE, colour_of[self.col1], self.PAIR)
+        tc.set_child_type(self.SINGLE, colour_of[self.col2], self.PAIR)
+        tc.set_child_type(self.SINGLE, colour_of[self.col4], self.SINGLE)
+        tc.set_child_type(self.PAIR, colour_of[self.col1], self.SINGLE)
+        tc.set_child_type(self.PAIR, colour_of[self.col2], self.SINGLE)
+        tc.set_child_type(self.PAIR, colour_of[self.col3], self.PAIR)
 
         return tc
 

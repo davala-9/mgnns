@@ -8,9 +8,18 @@ from src.rule_extraction.lattice_search import (
 )
 from src.rule_extraction.rule_optimisation_2 import compute_path_weights, path_weight_score_fn
 from src.rule_extraction.tree_shaped_conjunction import TreeShapedConjunction, TreeShapedConjunctionBuilder
+from src.rule_extraction.typed_constraint import TypedConstraint
 from src.utils.bitset import BitSet
 from src.utils.utils import backpropagate_relevance, TYPE_PRED
 import time
+
+# Filters var_id's own-feature mask through every given typed_constraint's always_zero constraint for
+# var_id's type under that constraint. var_types maps var_id to a list of types, one per typed_constraint
+# (same order); a var_id missing from var_types (e.g. because no typed_constraints were given) is left untouched.
+def filter_own_features_by_typed_constraints(mask, var_id, typed_constraints, var_types):
+    for tc, node_type in zip(typed_constraints, var_types.get(var_id, [])):
+        mask = tc.filter_out_always_zero_features(node_type, mask)
+    return mask
 
 class EquivalentProgramExtractor:
 
@@ -34,39 +43,51 @@ class EquivalentProgramExtractor:
     # Build initial upper bound/search space for a given position/predicate.
     # Also returns the paper's \mu: a (var id, layer) -> relevant Feature Mask dict, needed later to
     # compute per-atom weights for the Hail Mary heuristic (see atom_weights below).
-    def compute_tree_for(self, predicate_position):
+    def compute_tree_for(self, predicate_position, *typed_constraints_with_root_type: tuple[TypedConstraint, str]):
+        for tc, root_type in typed_constraints_with_root_type:
+            if root_type not in tc.types:
+                raise ValueError(f"{root_type!r} is not one of this constraint's declared types {tc.types}")
+        typed_constraints = [tc for tc, _ in typed_constraints_with_root_type]
+
         explanation_builder = TreeShapedConjunctionBuilder(self.internal_encoder.get_n_binary_predicates())
         L = self.model.num_layers
         explanation_builder.add(features=None,level=L,parent=-1)
         # Companion to basic_explanation. Maps a (var id, layer) to the relevant Feature Mask. This is the paper's \mu.
         initial_mask = BitSet.from_subset(self.internal_encoder.get_n_unary_predicates(),{predicate_position})
         var_layer_mask = {(0, L): initial_mask}
+        # Maps each var_id to a list of types, one per constraint in typed_constraints (same order).
+        var_types: dict[int, list] = {0: [root_type for _, root_type in typed_constraints_with_root_type]}
         # Paper's algorithm for constructing the conjunction
         for l in range(L, 0, -1):  # Iterate backwards over all layers from L to 1 (both inclusive).
             num_vars = explanation_builder.num_vars()
             for var_id in range(num_vars):
                 var_layer_mask[(var_id, l - 1)] =\
                     backpropagate_relevance(var_layer_mask[(var_id, l)], self.model.matrix_A(l))
-                for f in self.candidate_filters: # Filter any irrelevant positions using known information
-                    var_layer_mask[(var_id, l - 1)] = f(explanation_builder, var_id, None, l - 1,
-                                                        var_layer_mask[(var_id, l - 1)],
-                                                        self.internal_encoder, predicate_position)
                 # Introduce children new variables for var and define their relevant positions
                 for colour in self.internal_encoder.get_colours():
+                    # Optimisation: use constraints to prune if no neighbour by this colour is possible.
+                    if any(not tc.may_have_neighbour_of_colour(node_type, colour)
+                           for tc, node_type in zip(typed_constraints, var_types.get(var_id, []))):
+                        continue
+                    # The type, under each typed_constraint, that any child spawned via this colour must have.
+                    # Remember so far we are assuming this is unique and deterministic.
+                    child_types = [tc.get_child_type(node_type, colour)
+                                   for tc, node_type in zip(typed_constraints, var_types.get(var_id, []))]
                     candidates = backpropagate_relevance(var_layer_mask[(var_id, l)],
                                                          self.model.matrix_B(l, colour))
-                    for f in self.candidate_filters: # Filter any irrelevant positions using known information
-                        candidates = f(explanation_builder, var_id, colour, l - 1, candidates,
-                                       self.internal_encoder, predicate_position)
                     for j in candidates.elements():
                         new_var_id = (
                             explanation_builder.add(features=None, level=l - 1, parent=var_id, edge=(l, colour, j)))
                         var_layer_mask[(new_var_id, l - 1)] = \
                             BitSet.from_subset(self.model.layer_dimension(l - 1), {j})
+                        var_types[new_var_id] = child_types
 
         for var_id in range(explanation_builder.num_vars()):  # Add the atoms for the feature vectors in layer 0
-            explanation_builder.features[var_id] = var_layer_mask[(var_id, 0)]
             # Needs to be done separately, otherwise this is not done to the new variables added!
+            mask = filter_own_features_by_typed_constraints(
+                var_layer_mask[(var_id, 0)], var_id, typed_constraints, var_types)
+            var_layer_mask[(var_id, 0)] = mask
+            explanation_builder.features[var_id] = mask
         return explanation_builder.build(), var_layer_mask
 
     # Maps a data-signature predicate name back to its canonical unary predicate position.
