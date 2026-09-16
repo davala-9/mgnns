@@ -5,6 +5,7 @@ from src.encodings.noncanonical.noncanonical import NonCanonicalEncoder, GroundC
 from bidict import bidict
 
 from src.rule_extraction.tree_shaped_conjunction import TreeShapedConjunction
+from src.rule_extraction.typed_constraint import TypedConstraint
 from src.utils.bitset import BitSet
 from src.utils.utils import TYPE_PRED
 
@@ -215,6 +216,31 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
 
     def default_candidate_filters(self) -> list:
         return [self.filter_children_by_variable_role, self.filter_features_by_data_arity]
+
+    # The TypedConstraint describing this encoding's structure: SINGLE nodes represent one data constant,
+    # PAIR nodes represent a pair of them. Mirrors _child_role/filter_features_by_data_arity, but as
+    # declarative data.
+    def typed_constraint(self) -> TypedConstraint:
+        tc = TypedConstraint({self.SINGLE, self.PAIR})
+
+        binary_arity_predicates = [p for p, arity in zip(self.canonical_unary_predicates, self.position_arity)
+                                    if arity == 2]
+        unary_arity_predicates = [p for p, arity in zip(self.canonical_unary_predicates, self.position_arity)
+                                   if arity == 1]
+        tc.set_features_always_zero(self.SINGLE, *binary_arity_predicates)
+        tc.set_features_always_zero(self.PAIR, *unary_arity_predicates)
+
+        for colour in (self.col1, self.col2, self.col3):
+            tc.set_edge_never_exists(self.SINGLE, self.SINGLE, colour)
+        for colour in (self.col3, self.col4):
+            tc.set_edge_never_exists(self.SINGLE, self.PAIR, colour)
+        tc.set_edge_always_one(self.PAIR, self.SINGLE, self.col1)
+        tc.set_edge_always_one(self.PAIR, self.SINGLE, self.col2)
+        for colour in (self.col3, self.col4):
+            tc.set_edge_never_exists(self.PAIR, self.SINGLE, colour)
+        tc.set_edge_always_one(self.PAIR, self.PAIR, self.col3)
+
+        return tc
 
     # Builds the rule head tuple, in either binary or unary (type-fact) shape.
     def make_head(self, root_variables, head_predicate, head_is_binary):
