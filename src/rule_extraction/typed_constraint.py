@@ -44,6 +44,15 @@ class TypedConstraint:
         always_zero = self.get_feature_constraints(node_type).always_zero
         return mask.difference(BitSet.from_subset(mask.dimension, always_zero))
 
+    # Every group of predicates where at most one member may be set for node_type: each individual
+    # atmost_one predicate as its own singleton group, plus every atmost_one_of group. one_of is treated
+    # exactly like atmost_one_of -- we don't enforce "at least one", since omitting an atom entirely only
+    # makes the extracted rule more general, never unsound. Used to prune the lattice search's successor
+    # generation (see CompactSubTree.get_successors), not to filter candidate masks.
+    def feature_exclusivity_groups(self, node_type) -> list[frozenset]:
+        gc = self.get_feature_constraints(node_type)
+        return [frozenset({p}) for p in gc.atmost_one] + [frozenset(g) for g in gc.atmost_one_of + gc.one_of]
+
     # These features are always 1
     def set_features_always_one(self, node_type, *predicates) -> "TypedConstraint":
         self.get_feature_constraints(node_type).always_one.update(predicates)
@@ -102,6 +111,14 @@ class TypedConstraint:
     def set_edges_atmost_one_of(self, from_type, to_type, *colours) -> "TypedConstraint":
         self.get_edge_constraints(from_type, to_type).atmost_one_of.append(set(colours))
         return self
+
+    # Every group of colours where a node of from_type has at most one edge (to a node of to_type) among
+    # the group's members: each individual atmost_one colour as its own singleton group, plus every
+    # atmost_one_of group. one_of is treated exactly like atmost_one_of, for the same reason as
+    # feature_exclusivity_groups above. Used to prune the lattice search's successor generation.
+    def edge_exclusivity_groups(self, from_type, to_type) -> list[frozenset]:
+        gc = self.get_edge_constraints(from_type, to_type)
+        return [frozenset({c}) for c in gc.atmost_one] + [frozenset(g) for g in gc.atmost_one_of + gc.one_of]
 
     ### Child type: the (deterministic, see _child_type above) type of a child reached from a parent of
     ### parent_type via an edge of colour colour

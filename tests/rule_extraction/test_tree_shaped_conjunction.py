@@ -4,6 +4,7 @@ import torch
 from src.rule_extraction.tree_shaped_conjunction import (
     TreeShapedConjunctionBuilder, CompactSubTree,
 )
+from src.rule_extraction.typed_constraint import TypedConstraint
 from src.model.gnn_architectures import GNN
 from src.utils.bitset import BitSet
 
@@ -205,6 +206,129 @@ def test_get_successors_also_flips_bits_on_existing_nodes():
     successors = list(tree.initial_compact.get_successors(tree))
     # The root's own (still-empty) mask should get a "flip a 0 to a 1" successor too
     assert any(s.var_ids == (root,) for s in successors)
+
+
+# --- CompactSubTree.get_successors: TypedConstraint exclusivity pruning ---
+
+def build_feature_exclusivity_tree():
+    # A single-var tree whose type has a one_of group over predicate positions {0, 1}, out of 3
+    # candidate positions {0, 1, 2}.
+    tc = TypedConstraint({"T"})
+    tc.set_features_one_of("T", 0, 1)
+    builder = TreeShapedConjunctionBuilder(n_colours=1)
+    root_id = builder.add(features=BitSet.from_subset(5, {0, 1, 2}), level=0, parent=-1)
+    tree = builder.build(typed_constraints=(tc,), var_types={root_id: ["T"]})
+    return tree, root_id
+
+def test_get_successors_skips_a_feature_flip_that_would_violate_a_one_of_group():
+    tree, root = build_feature_exclusivity_tree()
+    # Compressed index 0 (= real position 0) already set.
+    compact = CompactSubTree(var_ids=(root,), masks=(BitSet.from_subset(3, {0}),))
+    successors = list(compact.get_successors(tree))
+    real_position_sets = [set(tree.features[root].from_compressed(s.masks[0]).elements()) for s in successors]
+    assert {0, 1} not in real_position_sets  # would set both members of the one_of group -- pruned
+    assert {0, 2} in real_position_sets      # position 2 isn't in the group -- still offered
+
+def test_get_successors_without_typed_constraints_does_not_prune_features():
+    # Same shape as build_feature_exclusivity_tree, but built without typed_constraints -- the default
+    # (empty var_types) must leave successor generation completely unpruned.
+    builder = TreeShapedConjunctionBuilder(n_colours=1)
+    root_id = builder.add(features=BitSet.from_subset(5, {0, 1, 2}), level=0, parent=-1)
+    tree = builder.build()
+    compact = CompactSubTree(var_ids=(root_id,), masks=(BitSet.from_subset(3, {0}),))
+    successors = list(compact.get_successors(tree))
+    real_position_sets = [set(tree.features[root_id].from_compressed(s.masks[0]).elements()) for s in successors]
+    assert {0, 1} in real_position_sets
+
+def build_edge_exclusivity_tree():
+    # Root has three candidate children, via colours c1/c2/c3. c1 and c2 share an atmost_one_of group;
+    # c3 is unrelated.
+    tc = TypedConstraint({"Parent", "Child"})
+    tc.set_edges_atmost_one_of("Parent", "Child", "c1", "c2")
+    builder = TreeShapedConjunctionBuilder(n_colours=3)
+    root_id = builder.add(features=BitSet.from_subset(2, set()), level=1, parent=-1)
+    child1_id = builder.add(features=BitSet.from_subset(2, set()), level=0, parent=root_id,
+                            edge=(1, "c1", frozenset({0})))
+    child2_id = builder.add(features=BitSet.from_subset(2, set()), level=0, parent=root_id,
+                            edge=(1, "c2", frozenset({0})))
+    child3_id = builder.add(features=BitSet.from_subset(2, set()), level=0, parent=root_id,
+                            edge=(1, "c3", frozenset({0})))
+    var_types = {root_id: ["Parent"], child1_id: ["Child"], child2_id: ["Child"], child3_id: ["Child"]}
+    tree = builder.build(typed_constraints=(tc,), var_types=var_types)
+    return tree, (root_id, child1_id, child2_id, child3_id)
+
+def test_get_successors_offers_either_member_of_an_edge_exclusivity_group_when_neither_present_yet():
+    tree, (root, child1, child2, child3) = build_edge_exclusivity_tree()
+    var_id_sets = {s.var_ids for s in tree.initial_compact.get_successors(tree)}
+    assert (root, child1) in var_id_sets
+    assert (root, child2) in var_id_sets
+    assert (root, child3) in var_id_sets
+
+def test_get_successors_skips_adding_a_second_child_in_the_same_edge_exclusivity_group():
+    tree, (root, child1, child2, child3) = build_edge_exclusivity_tree()
+    compact = CompactSubTree(
+        var_ids=(root, child1),
+        masks=(tree.features[root].to_empty_compressed(), tree.features[child1].to_empty_compressed()),
+    )
+    var_id_sets = {s.var_ids for s in compact.get_successors(tree)}
+    assert (root, child1, child2) not in var_id_sets  # c2 shares child1's atmost_one_of group with c1
+    assert (root, child1, child3) in var_id_sets       # c3 is unrelated -- still offered
+
+
+# --- CompactSubTree.get_successors: always_one prioritisation ---
+
+def build_feature_priority_tree():
+    # Root's type has 3 candidate positions {0, 1, 2}; only position 1 is always_one.
+    tc = TypedConstraint({"T"})
+    tc.set_features_always_one("T", 1)
+    builder = TreeShapedConjunctionBuilder(n_colours=1)
+    root_id = builder.add(features=BitSet.from_subset(5, {0, 1, 2}), level=0, parent=-1)
+    tree = builder.build(typed_constraints=(tc,), var_types={root_id: ["T"]})
+    return tree, root_id
+
+def test_get_successors_yields_an_always_one_feature_flip_first():
+    tree, root = build_feature_priority_tree()
+    compact = CompactSubTree(var_ids=(root,), masks=(tree.features[root].to_empty_compressed(),))
+    successors = list(compact.get_successors(tree))
+    # Without prioritisation this would be position 0 (BitSet.successors()' natural bit order).
+    first_real_positions = set(tree.features[root].from_compressed(successors[0].masks[0]).elements())
+    assert first_real_positions == {1}
+
+def build_edge_priority_tree():
+    # Root has three candidate children via c1/c2/c3; only c2 is always_one. Root itself has no
+    # candidate features, so get_successors' output is purely the new-child batch.
+    tc = TypedConstraint({"Parent", "Child"})
+    tc.set_edge_always_one("Parent", "Child", "c2")
+    builder = TreeShapedConjunctionBuilder(n_colours=3)
+    root_id = builder.add(features=BitSet.from_subset(2, set()), level=1, parent=-1)
+    child1_id = builder.add(features=BitSet.from_subset(2, set()), level=0, parent=root_id,
+                            edge=(1, "c1", frozenset({0})))
+    child2_id = builder.add(features=BitSet.from_subset(2, set()), level=0, parent=root_id,
+                            edge=(1, "c2", frozenset({0})))
+    child3_id = builder.add(features=BitSet.from_subset(2, set()), level=0, parent=root_id,
+                            edge=(1, "c3", frozenset({0})))
+    var_types = {root_id: ["Parent"], child1_id: ["Child"], child2_id: ["Child"], child3_id: ["Child"]}
+    tree = builder.build(typed_constraints=(tc,), var_types=var_types)
+    return tree, (root_id, child1_id, child2_id, child3_id)
+
+def test_get_successors_yields_an_always_one_new_child_first():
+    tree, (root, child1, child2, child3) = build_edge_priority_tree()
+    successors = list(tree.initial_compact.get_successors(tree))
+    # Without prioritisation this would be child1 (c1, ascending id order).
+    assert successors[0].var_ids == (root, child2)
+
+
+# --- TreeShapedConjunction TypedConstraint-derived caching ---
+
+def test_feature_exclusivity_groups_and_always_one_positions_are_cached():
+    tree, root = build_feature_priority_tree()
+    assert tree.feature_exclusivity_groups(root) is tree.feature_exclusivity_groups(root)
+    assert tree.feature_always_one_positions(root) is tree.feature_always_one_positions(root)
+
+def test_edge_exclusivity_groups_and_always_one_colours_are_cached():
+    tree, (root, child1, child2, child3) = build_edge_priority_tree()
+    assert tree.edge_exclusivity_groups(root, child1) is tree.edge_exclusivity_groups(root, child1)
+    assert tree.edge_always_one_colours(root, child1) is tree.edge_always_one_colours(root, child1)
 
 
 # --- CompactSubTree.get_predecessors ---

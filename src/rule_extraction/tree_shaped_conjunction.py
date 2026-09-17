@@ -26,19 +26,37 @@ class TreeShapedConjunctionBuilder:
     def num_vars(self):
             return len(self.features)
 
-    def build(self):
+    # typed_constraints/var_types: see TreeShapedConjunction -- passed in at build time (rather than
+    # tracked by the builder itself) since compute_tree_for already assembles var_types as it spawns
+    # each variable.
+    def build(self, typed_constraints: tuple = (), var_types: dict = None):
         return TreeShapedConjunction( self.n_colours,
             tuple(self.features), tuple(self.levels),
-            tuple(self.children), tuple(self.parent))
+            tuple(self.children), tuple(self.parent),
+            typed_constraints, var_types)
 
 # Immutable
 class TreeShapedConjunction:
-    def __init__(self, n_colours, features = (), levels = (), children = (), parent = ()):
+    def __init__(self, n_colours, features = (), levels = (), children = (), parent = (),
+                 typed_constraints: tuple = (), var_types: dict = None):
         self.n_colours = n_colours
         self.features = features
         self.levels = levels
         self.children = children
         self.parent = parent
+        # The TypedConstraints this tree was built under, and each var_id's type under every one of them
+        # (same order, one type per constraint) -- empty/{} when the tree was built without any. Used by
+        # CompactSubTree.get_successors to prune the lattice search (see feature_exclusivity_groups and
+        # edge_exclusivity_groups below), not by compute_tree_for itself.
+        self.typed_constraints = typed_constraints
+        self.var_types = var_types if var_types is not None else {}
+        # Caches for the four methods below: each depends only on var_id/pair plus typed_constraints/
+        # var_types, both fixed for this tree's lifetime, so there's no point recomputing them every time
+        # CompactSubTree.get_successors is called for the same var_id/pair across many search steps.
+        self._feature_exclusivity_groups_cache = {}
+        self._edge_exclusivity_groups_cache = {}
+        self._feature_always_one_positions_cache = {}
+        self._edge_always_one_colours_cache = {}
 
         self.parent_edge = [None,] # Auxiliary mapping from a node to its incoming edge
         for var_id in range(1,len(self)):
@@ -50,6 +68,51 @@ class TreeShapedConjunction:
             else:
                 raise AssertionError(f"variable {var_id} not found among the children of its parent {par_id}")
         self.parent_edge = tuple(self.parent_edge)
+
+    # Every feature-position exclusivity group applicable to var_id (see TypedConstraint.
+    # feature_exclusivity_groups), aggregated across every typed_constraint via its own type for var_id.
+    # Empty if var_id has no entry in var_types (e.g. the tree was built without any typed_constraints).
+    def feature_exclusivity_groups(self, var_id) -> list[frozenset]:
+        if var_id not in self._feature_exclusivity_groups_cache:
+            self._feature_exclusivity_groups_cache[var_id] = [
+                g for tc, node_type in zip(self.typed_constraints, self.var_types.get(var_id, []))
+                for g in tc.feature_exclusivity_groups(node_type)]
+        return self._feature_exclusivity_groups_cache[var_id]
+
+    # Every colour exclusivity group applicable to an edge from from_var_id to to_var_id (see
+    # TypedConstraint.edge_exclusivity_groups), aggregated the same way as feature_exclusivity_groups.
+    def edge_exclusivity_groups(self, from_var_id, to_var_id) -> list[frozenset]:
+        key = (from_var_id, to_var_id)
+        if key not in self._edge_exclusivity_groups_cache:
+            from_types = self.var_types.get(from_var_id, [])
+            to_types = self.var_types.get(to_var_id, [])
+            self._edge_exclusivity_groups_cache[key] = [
+                g for tc, from_type, to_type in zip(self.typed_constraints, from_types, to_types)
+                for g in tc.edge_exclusivity_groups(from_type, to_type)]
+        return self._edge_exclusivity_groups_cache[key]
+
+    # Every feature position that's always_one for var_id, aggregated across every typed_constraint via
+    # its own type for var_id. Used only to prioritise CompactSubTree.get_successors' bit-flip order
+    # (an always_one position is guaranteed true, so trying it first tends to reach a sound state
+    # sooner), never to filter which positions are candidates at all.
+    def feature_always_one_positions(self, var_id) -> frozenset:
+        if var_id not in self._feature_always_one_positions_cache:
+            self._feature_always_one_positions_cache[var_id] = frozenset(
+                p for tc, node_type in zip(self.typed_constraints, self.var_types.get(var_id, []))
+                for p in tc.get_feature_constraints(node_type).always_one)
+        return self._feature_always_one_positions_cache[var_id]
+
+    # Every colour that's always_one for an edge from from_var_id to to_var_id, aggregated the same way
+    # as feature_always_one_positions. Used only to prioritise which new child get_successors offers first.
+    def edge_always_one_colours(self, from_var_id, to_var_id) -> frozenset:
+        key = (from_var_id, to_var_id)
+        if key not in self._edge_always_one_colours_cache:
+            from_types = self.var_types.get(from_var_id, [])
+            to_types = self.var_types.get(to_var_id, [])
+            self._edge_always_one_colours_cache[key] = frozenset(
+                c for tc, from_type, to_type in zip(self.typed_constraints, from_types, to_types)
+                for c in tc.get_edge_constraints(from_type, to_type).always_one)
+        return self._edge_always_one_colours_cache[key]
 
     # Takes a variable and returns a TreeShapedConjunction that is the minimal subtree connecting it to the root
     def get_subtree_for(self, var_id: int, ):
@@ -145,7 +208,8 @@ class TreeShapedConjunction:
         if not 0 <= var_id < len(self):
             raise ValueError(f"variable {var_id} does not appear to exist in the tree")
         new_features = self.features[:var_id] + (feature,) + self.features[var_id + 1:]
-        return TreeShapedConjunction(self.n_colours, new_features, self.levels, self.children, self.parent)
+        return TreeShapedConjunction(self.n_colours, new_features, self.levels, self.children, self.parent,
+                                     self.typed_constraints, self.var_types)
 
     def __len__(self):
         return len(self.features)
@@ -166,24 +230,66 @@ class CompactSubTree:
         return hash((self.var_ids, self.masks))
 
     def get_successors(self, base_tree):
-        # First get successors obtained by flipping a 0 to a 1 in the max of an existing node
-        for var_id in range(len(self.var_ids)):
-            for new_mask in self.masks[var_id].successors():
-                yield CompactSubTree(self.var_ids, self.masks[:var_id] + (new_mask,) + self.masks[var_id + 1:])
-        # Next, get successors obtained by adding a NEW child
+        var_id_set = set(self.var_ids)
+        # First get successors obtained by flipping a 0 to a 1 in the mask of an existing node -- skipped
+        # when it would set a second member of a feature exclusivity group that already has a member set
+        # (see TypedConstraint.feature_exclusivity_groups): that combination is structurally impossible,
+        # so there's no point spending a soundness check on it. Among the rest, a flip that sets an
+        # always_one position (guaranteed true, so likely to move towards a sound state -- see
+        # TreeShapedConjunction.feature_always_one_positions) is yielded before the others. Both of these
+        # only reorder/remove what's already offered -- never more than one atom added per step, so
+        # get_predecessors/_new_atom_weight need no changes.
+        for index, var_id in enumerate(self.var_ids):
+            groups = base_tree.feature_exclusivity_groups(var_id)
+            always_one_positions = base_tree.feature_always_one_positions(var_id)
+            if groups:
+                current_positions = set(base_tree.features[var_id].from_compressed(self.masks[index]).elements())
+            priority, rest = [], []
+            for new_mask in self.masks[index].successors():
+                new_compact_pos = self.masks[index].new_elements(new_mask)[0]
+                new_position = base_tree.features[var_id].elements()[new_compact_pos]
+                if groups and any(new_position in g and current_positions & g for g in groups):
+                    continue
+                successor = CompactSubTree(self.var_ids, self.masks[:index] + (new_mask,) + self.masks[index + 1:])
+                (priority if new_position in always_one_positions else rest).append(successor)
+            yield from priority
+            yield from rest
+        # Next, get successors obtained by adding a NEW child -- skipped when it would connect a second
+        # child within an edge exclusivity group that already has a connected child (see TypedConstraint.
+        # edge_exclusivity_groups). Among the rest, a new child connected via an always_one colour (see
+        # TreeShapedConjunction.edge_always_one_colours) is yielded before the others, for the same reason
+        # as above.
         added_children = set() # First we extract all new nodes that need to be added
         added_children.update(child_id for var_id in self.var_ids for child_id in base_tree.children[var_id].values())
         added_children.difference_update(self.var_ids) # Remove those that are already present in the subtree
         added_children = sorted(added_children) # Sorted in ascending order
-        # Efficient generation of the new CompactSubTrees in one pass through both tuples
+        existing_colours_by_parent = {}  # parent var_id -> colours of its children already in this subtree
+        priority, rest = [], []
+        # Efficient generation of the new CompactSubTrees in one pass through both tuples (buffered into
+        # priority/rest so the always_one reordering doesn't need a second pass, just a delayed yield)
         j = 0 # iteration over var_ids in this tree
         for child_id in added_children:
             while j < len(self.var_ids) and self.var_ids[j] < child_id:
                 j += 1
+            parent_id = base_tree.parent[child_id]
+            colour = base_tree.parent_edge[child_id][1]
+            groups = base_tree.edge_exclusivity_groups(parent_id, child_id)
+            if groups:
+                if parent_id not in existing_colours_by_parent:
+                    existing_colours_by_parent[parent_id] = {
+                        base_tree.parent_edge[cid][1] for cid in base_tree.children[parent_id].values()
+                        if cid in var_id_set
+                    }
+                if any(colour in g and existing_colours_by_parent[parent_id] & g for g in groups):
+                    continue
             new_var_ids = self.var_ids[:j] + (child_id,) + self.var_ids[j:]
             new_mask = base_tree.features[child_id].to_empty_compressed() # We work with compressed sub-bitsets
             new_maskset = self.masks[:j] + (new_mask,) + self.masks[j:]
-            yield CompactSubTree(new_var_ids, new_maskset)
+            successor = CompactSubTree(new_var_ids, new_maskset)
+            is_always_one = colour in base_tree.edge_always_one_colours(parent_id, child_id)
+            (priority if is_always_one else rest).append(successor)
+        yield from priority
+        yield from rest
 
     def get_predecessors(self, base_tree):
         # First, get predecessors obtained by flipping a 1 to a 0

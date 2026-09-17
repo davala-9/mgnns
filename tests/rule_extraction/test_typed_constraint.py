@@ -52,6 +52,21 @@ class TestFeatureConstraints:
         with pytest.raises(ValueError):
             tc.get_feature_constraints(NONROOT)
 
+    def test_feature_exclusivity_groups_combines_atmost_one_singletons_with_grouped_constraints(self):
+        tc = TypedConstraint({NONROOT})
+        tc.get_feature_constraints(NONROOT).atmost_one.update({"C"})
+        tc.set_features_one_of(NONROOT, "A", "B")
+        tc.get_feature_constraints(NONROOT).atmost_one_of.append({"D", "E"})
+        groups = tc.feature_exclusivity_groups(NONROOT)
+        assert frozenset({"C"}) in groups
+        assert frozenset({"A", "B"}) in groups
+        assert frozenset({"D", "E"}) in groups
+        assert len(groups) == 3
+
+    def test_feature_exclusivity_groups_empty_when_no_constraints_set(self):
+        tc = TypedConstraint({NONROOT})
+        assert tc.feature_exclusivity_groups(NONROOT) == []
+
 
 class TestEdgeConstraints:
     def test_unset_pair_starts_with_empty_constraints(self):
@@ -103,3 +118,16 @@ class TestEdgeConstraints:
         tc = TypedConstraint({ROOT})
         with pytest.raises(ValueError):
             tc.get_edge_constraints(ROOT, NONROOT)
+
+    def test_edge_exclusivity_groups_combines_atmost_one_singletons_with_grouped_constraints_and_one_of(self):
+        tc = TypedConstraint({ROOT, NONROOT})
+        tc.set_edge_exists_atmost_one(NONROOT, NONROOT, "c1")
+        tc.set_edges_atmost_one_of(NONROOT, NONROOT, "c2", "c3")
+        tc.set_edges_one_of(NONROOT, NONROOT, "c4", "c5")
+        groups = tc.edge_exclusivity_groups(NONROOT, NONROOT)
+        assert frozenset({"c1"}) in groups
+        assert frozenset({"c2", "c3"}) in groups
+        assert frozenset({"c4", "c5"}) in groups
+        assert len(groups) == 3
+        # A different type pair's constraints don't leak in.
+        assert tc.edge_exclusivity_groups(ROOT, NONROOT) == []

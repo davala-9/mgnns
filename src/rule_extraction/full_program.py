@@ -111,7 +111,7 @@ class EquivalentProgramExtractor:
                 var_layer_mask[(var_id, 0)], var_id, typed_constraints, var_types)
             var_layer_mask[(var_id, 0)] = mask
             explanation_builder.features[var_id] = mask
-        return explanation_builder.build(), var_layer_mask
+        return explanation_builder.build(tuple(typed_constraints), var_types), var_layer_mask
 
     # Maps a data-signature predicate name back to its canonical unary predicate position.
     def resolve_predicate_position(self, data_predicate: str) -> int:
