@@ -14,6 +14,9 @@ if __name__ == "__main__":
     parser.add_argument("output", help='Path of the folder where we will save the output')
     parser.add_argument("--predicate", help='Only extract rules whose head is this predicate. '
                                              'If omitted, extracts rules for all predicates.')
+    parser.add_argument("--adni", action="store_true",
+                        help='Constrain extraction with the ADNI dataset\'s TypedConstraint. Only valid '
+                             'when the external encoding is the Identity encoder.')
     parser.add_argument("encoding", choices=[e.value for e in EncoderType],
                         help='Encoding scheme the model & encoders were saved with')
     args = parser.parse_args()
@@ -24,7 +27,8 @@ if __name__ == "__main__":
     encoder_scheme = EncoderType(args.encoding)
     external_encoder, internal_encoder = load_encoder(args.input, encoder_scheme)
 
-    extract_program(ef,device,model,args.threshold,external_encoder,internal_encoder,args.predicate)
+    extract_program(ef, device, model, args.threshold, external_encoder, internal_encoder, args.predicate,
+                    use_adni_constraint=args.adni)
 
 
 

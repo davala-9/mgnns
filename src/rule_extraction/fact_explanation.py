@@ -71,7 +71,8 @@ class FactExplainer:
                         best_idx = np.argmax(neighbour_vectors[:, j])
                         if neighbour_vectors[best_idx, j] > 0:
                             new_var_id = (
-                                explanation_builder.add(features=None,level=l-1,parent=var_id,edge=(l, colour, j)))
+                                explanation_builder.add(
+                                    features=None,level=l-1,parent=var_id,edge=(l, colour, frozenset({j}))))
                             varid_2_constid[new_var_id] = neighbours[best_idx]
                             var_layer_mask[(new_var_id, l - 1)] = (
                                 BitSet.from_subset(self.model.layer_dimension(l - 1), {j}))

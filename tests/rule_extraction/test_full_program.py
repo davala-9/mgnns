@@ -188,14 +188,12 @@ class TestBinaryPredicateArityBug:
     # With the fix, "R" is excluded from the child's candidates outright (wrong arity for a single-typed
     # variable), leaving exactly the one correctly-typed rule.
     #
-    # XFAIL: compute_tree_for's own-feature (level 0) filtering was migrated from self.candidate_filters
-    # (which included ICLREncoderDecoder.filter_features_by_data_arity, the arity check this test guards)
-    # to filter_own_features_by_typed_constraints, driven by the *typed_constraints/var_types it's given.
-    # Nothing yet calls compute_tree_for/compute_all_upper_bounds with ICLR22's typed_constraint(), and
-    # var_types is never populated (that population logic -- assigning each var_id its type per
-    # constraint -- is still to be written). So this call site currently enforces no arity constraint at
-    # all, and the bug this test guards against is back until that wiring exists.
-    @pytest.mark.xfail(reason="compute_tree_for's arity filtering isn't wired to typed_constraint yet", strict=True)
+    # compute_tree_for's own-feature (level 0) filtering was migrated from self.candidate_filters (which
+    # included ICLREncoderDecoder.filter_features_by_data_arity, the arity check this test guards) to
+    # filter_own_features_by_typed_constraints, driven by the *typed_constraints/var_types it's given.
+    # compute_all_upper_bounds now calls compute_tree_for with ICLR22's typed_constraint() and the right
+    # root role (ICLREncoderDecoder.root_role), so var_types is populated again and the arity constraint
+    # this test guards is back in force.
     def test_does_not_print_a_binary_predicate_with_unary_syntax_in_the_body(self):
         model = GNN(feature_dimension=2, num_edge_colours=4, aggregation_1="max", aggregation_2="max")
         for c in range(4):

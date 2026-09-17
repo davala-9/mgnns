@@ -36,15 +36,16 @@ def compute_path_weights(model, rule_body: TreeShapedConjunction, var_layer_mask
         level = rule_body.levels[var_id]
         if var_id != 0:
             parent = rule_body.parent[var_id]
-            edge_layer, colour, child_pos = rule_body.parent_edge[var_id]
+            edge_layer, colour, child_positions = rule_body.parent_edge[var_id]
             matrix = model.matrix_A(edge_layer) if colour == -1 else model.matrix_B(edge_layer, colour)
             parent_vec = self_vec[(parent, edge_layer)]
             edge_weight = sum(
-                parent_vec[j].item() * matrix[j, child_pos].item()
+                parent_vec[j].item() * sum(matrix[j, p].item() for p in child_positions)
                 for j in var_layer_mask[(parent, edge_layer)].elements()
             )
             start_vec = torch.zeros(model.layer_dimension(level))
-            start_vec[child_pos] = edge_weight
+            for p in child_positions:
+                start_vec[p] = edge_weight
             self_vec[(var_id, level)] = start_vec
         # Propagate var_id's own vector down to layer 0 via repeated self-hops (matrix_A only: neighbour
         # aggregation is handled separately, via the tree's own children, not as a self-hop).

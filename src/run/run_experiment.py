@@ -128,11 +128,12 @@ def save_predictions(ef, predictions):
             output2.write("{}\t{}\t{}\t{}\n".format(s, p, o, score))
     output.close()
 
-def extract_program(ef, device, model, threshold, external_encoder, internal_encoder, predicate=None):
+def extract_program(ef, device, model, threshold, external_encoder, internal_encoder, predicate=None,
+                    use_adni_constraint=False):
     print("Computing full equivalent program...")
     program_file = ef / "program.txt"
     program_extractor = EquivalentProgramExtractor(device, model, threshold, external_encoder,
-                                                   internal_encoder)
+                                                   internal_encoder, use_adni_constraint=use_adni_constraint)
     predicate_positions = None
     if predicate is not None:
         predicate_positions = [program_extractor.resolve_predicate_position(predicate)]

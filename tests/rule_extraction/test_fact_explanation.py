@@ -357,13 +357,13 @@ class TestFactExplainer:
         # Root variable is always var_id 0
         assert conjunction.features[0] == BitSet.from_subset(dimension=2, subset={0})
         assert conjunction.levels[0] == 2
-        assert (2, 1, 0) in conjunction.children[0]  # In layer 2, we introduce a child variable via S (1) for position 0
-        assert (1, 0, 0) in conjunction.children[0]  # In layer 1, we introduce a child variable via R (0) for position 0
-        vy = conjunction.children[0][(2, 1, 0)]
+        assert (2, 1, frozenset({0})) in conjunction.children[0]  # In layer 2, we introduce a child variable via S (1) for position 0
+        assert (1, 0, frozenset({0})) in conjunction.children[0]  # In layer 1, we introduce a child variable via R (0) for position 0
+        vy = conjunction.children[0][(2, 1, frozenset({0}))]
         assert conjunction.features[vy] == BitSet.from_subset(dimension=2, subset={0})
         assert conjunction.levels[vy] == 1
         assert conjunction.children[vy] == {}
-        vz = conjunction.children[0][(1, 0, 0)]
+        vz = conjunction.children[0][(1, 0, frozenset({0}))]
         assert conjunction.features[vz] == BitSet.from_subset(dimension=2, subset={0})
         assert conjunction.levels[vz] == 0
         assert conjunction.children[vz] == {}
@@ -432,17 +432,17 @@ class TestFactExplainer:
         # Root variable (var_id 0) represents ab
         assert conjunction.features[0] == BitSet.from_subset(dimension=3, subset=set())
         assert conjunction.levels[0] == 2
-        assert (2, 0, 0) in conjunction.children[0]  # In layer 2, we introduce a child variable via c1 (0) for position 0
-        vy = conjunction.children[0][(2, 0, 0)]  # represents a
+        assert (2, 0, frozenset({0})) in conjunction.children[0]  # In layer 2, we introduce a child variable via c1 (0) for position 0
+        vy = conjunction.children[0][(2, 0, frozenset({0}))]  # represents a
         assert conjunction.features[vy] == BitSet.from_subset(dimension=3, subset={0})
         assert conjunction.levels[vy] == 1
-        assert (1, 0, 2) in conjunction.children[vy]  # In layer 1, we introduce a child variable via c1 (0) for position 2
-        vz = conjunction.children[vy][(1, 0, 2)]  # represents az
+        assert (1, 0, frozenset({2})) in conjunction.children[vy]  # In layer 1, we introduce a child variable via c1 (0) for position 2
+        vz = conjunction.children[vy][(1, 0, frozenset({2}))]  # represents az
         assert conjunction.features[vz] == BitSet.from_subset(dimension=3, subset={2})
         assert conjunction.levels[vz] == 0
         assert conjunction.children[vz] == {}
-        assert (2, 2, 1) in conjunction.children[0]  # In layer 2, we introduce a child variable via c3 (2) for position 1
-        vt = conjunction.children[0][(2, 2, 1)]  # represents ba
+        assert (2, 2, frozenset({1})) in conjunction.children[0]  # In layer 2, we introduce a child variable via c3 (2) for position 1
+        vt = conjunction.children[0][(2, 2, frozenset({1}))]  # represents ba
         assert conjunction.features[vt] == BitSet.from_subset(dimension=3, subset={2})
         assert conjunction.levels[vt] == 1
         assert conjunction.children[vt] == {}

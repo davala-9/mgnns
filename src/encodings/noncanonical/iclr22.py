@@ -180,7 +180,7 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
         return self._child_role(parent_role, bin_pred)
 
     # The role of the tree's root, fixed by the arity (in the data signature) of predicate_position itself.
-    def _root_role(self, predicate_position):
+    def root_role(self, predicate_position):
         return self.PAIR if self.position_arity[predicate_position] == 2 else self.SINGLE
 
     # A candidate filter (see EquivalentProgramExtractor.candidate_filters): rules out spawning any child
@@ -190,7 +190,7 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
                                           predicate_position):
         if colour is None:
             return mask
-        role = self._role_of(builder, var_id, internal_encoder, self._root_role(predicate_position))
+        role = self._role_of(builder, var_id, internal_encoder, self.root_role(predicate_position))
         bin_pred = internal_encoder.binary_pred_colour_dict.inverse[colour]
         if self._child_role(role, bin_pred) is None:
             return BitSet(mask.dimension, 0)
@@ -204,7 +204,7 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
                                        predicate_position):
         if level != 0:
             return mask
-        role = self._role_of(builder, var_id, internal_encoder, self._root_role(predicate_position))
+        role = self._role_of(builder, var_id, internal_encoder, self.root_role(predicate_position))
         if colour is not None:
             bin_pred = internal_encoder.binary_pred_colour_dict.inverse[colour]
             role = self._child_role(role, bin_pred)

@@ -1,7 +1,10 @@
 from typing import Callable
 
 from src.encodings.canonical import CanonicalEncoderDecoder
+from src.encodings.noncanonical.iclr22 import ICLREncoderDecoder
+from src.encodings.noncanonical.identity import IdentityEncoderDecoder
 from src.encodings.noncanonical.noncanonical import NonCanonicalEncoder
+from src.rule_extraction.constraints.adni import adni_constraint, ROOT as ADNI_ROOT
 from src.rule_extraction.lattice_search import (
     Frontier, BFSFrontier, SinglePathFrontier, GreedyBestSuccessorFrontier, AllMinimalPolicy, FirstResultPolicy,
     search,
@@ -24,12 +27,17 @@ def filter_own_features_by_typed_constraints(mask, var_id, typed_constraints, va
 class EquivalentProgramExtractor:
 
     def __init__(self, device, model, threshold, external_encoder: NonCanonicalEncoder,
-                 internal_encoder: CanonicalEncoderDecoder, candidate_filters: list[Callable] = None):
+                 internal_encoder: CanonicalEncoderDecoder, candidate_filters: list[Callable] = None,
+                 use_adni_constraint: bool = False):
         self.device = device
         self.model = model
         self.threshold = threshold
         self.external_encoder = external_encoder
         self.internal_encoder = internal_encoder
+        # Only meaningful when external_encoder is an IdentityEncoderDecoder: the ADNI dataset's structure
+        # (src/rule_extraction/constraints/adni.py) isn't implied by the encoding itself the way ICLR22's
+        # is, so it has to be opted into explicitly (see compute_all_upper_bounds).
+        self.use_adni_constraint = use_adni_constraint
         # Each filter: (builder, var_id, colour, level, mask, internal_encoder, predicate_position) -> mask,
         # applied in order in compute_tree_for to narrow relevant-position masks before they're used, either
         # for var_id's own features (colour=None) or for children spawned from var_id via colour. Always
@@ -41,8 +49,6 @@ class EquivalentProgramExtractor:
         self._atom_weight_cache: dict[int, dict] = {}
 
     # Build initial upper bound/search space for a given position/predicate.
-    # Also returns the paper's \mu: a (var id, layer) -> relevant Feature Mask dict, needed later to
-    # compute per-atom weights for the Hail Mary heuristic (see atom_weights below).
     def compute_tree_for(self, predicate_position, *typed_constraints_with_root_type: tuple[TypedConstraint, str]):
         for tc, root_type in typed_constraints_with_root_type:
             if root_type not in tc.types:
@@ -52,7 +58,7 @@ class EquivalentProgramExtractor:
         explanation_builder = TreeShapedConjunctionBuilder(self.internal_encoder.get_n_binary_predicates())
         L = self.model.num_layers
         explanation_builder.add(features=None,level=L,parent=-1)
-        # Companion to basic_explanation. Maps a (var id, layer) to the relevant Feature Mask. This is the paper's \mu.
+        # Maps a (var id, layer) to the relevant Feature Mask: this is the paper's \mu.
         initial_mask = BitSet.from_subset(self.internal_encoder.get_n_unary_predicates(),{predicate_position})
         var_layer_mask = {(0, L): initial_mask}
         # Maps each var_id to a list of types, one per constraint in typed_constraints (same order).
@@ -61,26 +67,43 @@ class EquivalentProgramExtractor:
         for l in range(L, 0, -1):  # Iterate backwards over all layers from L to 1 (both inclusive).
             num_vars = explanation_builder.num_vars()
             for var_id in range(num_vars):
+                # First update self mask for the next layer.
                 var_layer_mask[(var_id, l - 1)] =\
                     backpropagate_relevance(var_layer_mask[(var_id, l)], self.model.matrix_A(l))
-                # Introduce children new variables for var and define their relevant positions
+                # Then introduce all relevant children and define their relevant positions
                 for colour in self.internal_encoder.get_colours():
-                    # Optimisation: use constraints to prune if no neighbour by this colour is possible.
+                    # Optimisation: use TypedConstraints to prune if no neighbour by this colour is possible.
                     if any(not tc.may_have_neighbour_of_colour(node_type, colour)
                            for tc, node_type in zip(typed_constraints, var_types.get(var_id, []))):
                         continue
-                    # The type, under each typed_constraint, that any child spawned via this colour must have.
-                    # Remember so far we are assuming this is unique and deterministic.
+                    # Compute types under TypedConstraints for any child by colour. Currently unique and deterministic.
                     child_types = [tc.get_child_type(node_type, colour)
                                    for tc, node_type in zip(typed_constraints, var_types.get(var_id, []))]
-                    candidates = backpropagate_relevance(var_layer_mask[(var_id, l)],
-                                                         self.model.matrix_B(l, colour))
-                    for j in candidates.elements():
-                        new_var_id = (
-                            explanation_builder.add(features=None, level=l - 1, parent=var_id, edge=(l, colour, j)))
-                        var_layer_mask[(new_var_id, l - 1)] = \
-                            BitSet.from_subset(self.model.layer_dimension(l - 1), {j})
-                        var_types[new_var_id] = child_types
+                    candidates = backpropagate_relevance(var_layer_mask[(var_id, l)], self.model.matrix_B(l, colour))
+                    # If any typed_constraint says a node of var_id's type has at most one neighbour of
+                    # child_type via this colour, that single (possible) child covers every candidate position
+                    # at once, rather than spawning one variable per candidate.
+                    at_most_one = any(
+                        colour in tc.get_edge_constraints(node_type, child_type).atmost_one
+                        for tc, node_type, child_type
+                        in zip(typed_constraints, var_types.get(var_id, []), child_types))
+                    if at_most_one:
+                        if not candidates.is_empty():
+                            new_var_id = explanation_builder.add(
+                                features=None, level=l - 1, parent=var_id,
+                                edge=(l, colour, frozenset(candidates.elements())))
+                            var_layer_mask[(new_var_id, l - 1)] = candidates
+                            var_types[new_var_id] = child_types
+                    else:
+                        for j in candidates.elements():
+                            new_var_id = (
+                                explanation_builder.add(
+                                    features=None, level=l - 1, parent=var_id, edge=(l, colour, frozenset({j}))))
+                            var_layer_mask[(new_var_id, l - 1)] = \
+                                BitSet.from_subset(self.model.layer_dimension(l - 1), {j})
+                            var_types[new_var_id] = child_types
+
+        # Next, consider the non-deterministic version of having multiple trees to turn combinatorial explosion into linear
 
         for var_id in range(explanation_builder.num_vars()):  # Add the atoms for the feature vectors in layer 0
             # Needs to be done separately, otherwise this is not done to the new variables added!
@@ -102,8 +125,22 @@ class EquivalentProgramExtractor:
     def compute_all_upper_bounds(self, predicate_positions=None):
         if predicate_positions is None:
             predicate_positions = range(self.internal_encoder.get_n_unary_predicates())
+        is_iclr = isinstance(self.external_encoder, ICLREncoderDecoder)
+        is_adni = self.use_adni_constraint and isinstance(self.external_encoder, IdentityEncoderDecoder)
         for i in predicate_positions:
-            self.base_tree[i], self.var_layer_mask[i] = self.compute_tree_for(i)
+            if is_iclr:
+                typed_constraints_with_root_type = (
+                    (self.external_encoder.typed_constraint(), self.external_encoder.root_role(i)),)
+            elif is_adni:
+                # Unlike ICLR22, ADNI's root role never depends on predicate_position: the root is
+                # always ROOT.
+                typed_constraints_with_root_type = (
+                    (adni_constraint(self.internal_encoder.unary_pred_position_dict,
+                                      self.internal_encoder.binary_pred_colour_dict), ADNI_ROOT),)
+            else:
+                typed_constraints_with_root_type = ()
+            self.base_tree[i], self.var_layer_mask[i] = (
+                self.compute_tree_for(i, *typed_constraints_with_root_type))
 
     # Optimisation 2's analytic per-atom weights (see rule_optimisation_2.compute_path_weights), computed
     # lazily and cached: they're only needed to steer the Hail Mary fallback (see hail_mary_frontier below)
