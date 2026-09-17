@@ -236,3 +236,36 @@ class TestBinaryPredicateArityBug:
                 arity = extractor.external_encoder.data_pred_to_arity.get(printed_predicate)
                 assert not (is_unary_syntax and arity == 2), \
                     f"binary predicate {printed_predicate!r} printed with unary syntax: <{printed_predicate}>[?{s}]"
+
+
+class TestComputeAllUpperBoundsBuildsTypedConstraintOnce:
+    # Regression test: compute_all_upper_bounds used to call external_encoder.typed_constraint() (and
+    # adni_constraint()) fresh, inside the per-predicate loop, even though the result doesn't depend on
+    # which predicate is being processed -- pure waste, rebuilding the same TypedConstraint from scratch
+    # once per predicate instead of once for the whole call.
+    def test_typed_constraint_is_built_once_not_once_per_predicate(self, monkeypatch):
+        model = GNN(feature_dimension=2, num_edge_colours=4, aggregation_1="max", aggregation_2="max")
+        external_encoder = ICLREncoderDecoder(load_from_document=None, unary_predicates=["A"],
+                                              binary_predicates=["R"])
+        internal_encoder = CanonicalEncoderDecoder(load_from_document=None,
+            unary_predicates=external_encoder.canonical_unary_predicates,
+            binary_predicates=external_encoder.canonical_binary_predicates)
+        # This fixture must have more than one unary predicate position, or this test can't distinguish
+        # "built once" from "built once per predicate".
+        assert internal_encoder.get_n_unary_predicates() > 1
+
+        call_count = 0
+        original_typed_constraint = ICLREncoderDecoder.typed_constraint
+
+        def counting_typed_constraint(self):
+            nonlocal call_count
+            call_count += 1
+            return original_typed_constraint(self)
+
+        monkeypatch.setattr(ICLREncoderDecoder, "typed_constraint", counting_typed_constraint)
+
+        extractor = EquivalentProgramExtractor(torch.device("cpu"), model, threshold=0.5,
+                                               external_encoder=external_encoder, internal_encoder=internal_encoder)
+        extractor.compute_all_upper_bounds()  # no predicate_positions given -- processes every predicate
+
+        assert call_count == 1

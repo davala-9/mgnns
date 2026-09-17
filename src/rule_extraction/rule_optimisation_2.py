@@ -117,8 +117,11 @@ def _new_atom_weight(base_tree, weights, predecessor, node):
         return 0.0  # a freshly added child always starts out with an empty mask -- nothing to weigh yet
     for var_id, old_mask, new_mask in zip(node.var_ids, predecessor.masks, node.masks):
         if old_mask != new_mask:
-            new_compact_pos = (set(new_mask.elements()) - set(old_mask.elements())).pop()
-            real_pos = base_tree.features[var_id].elements()[new_compact_pos]
+            new_compact_pos = old_mask.new_elements(new_mask)[0]
+            # feature_positions is cached on base_tree (unlike features[var_id].elements(), which would
+            # rescan the whole predicate dimension every single time this runs -- once per candidate
+            # scored during a GreedyBestSuccessorFrontier climb, i.e. the Hail Mary/minimise_rule path).
+            real_pos = base_tree.feature_positions(var_id)[new_compact_pos]
             return weights.get((var_id, real_pos), 0.0)
     raise AssertionError("node is identical to predecessor")
 

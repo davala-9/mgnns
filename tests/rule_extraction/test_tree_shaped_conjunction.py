@@ -330,6 +330,18 @@ def test_edge_exclusivity_groups_and_always_one_colours_are_cached():
     assert tree.edge_exclusivity_groups(root, child1) is tree.edge_exclusivity_groups(root, child1)
     assert tree.edge_always_one_colours(root, child1) is tree.edge_always_one_colours(root, child1)
 
+def test_feature_positions_is_cached_and_matches_a_fresh_elements_call():
+    # Regression test: get_successors used to call features[var_id].elements() -- an O(dimension) scan
+    # of the WHOLE predicate space -- once per candidate successor, instead of once per var. This proved
+    # to be the dominant cost slowing the lattice search down once typed_constraints actually got wired
+    # in for real (see full_program.py history). feature_positions replaces that call site precisely so
+    # this scan happens once per var_id ever, not once per successor.
+    builder = TreeShapedConjunctionBuilder(n_colours=1)
+    root_id = builder.add(features=BitSet.from_subset(5, {0, 2, 4}), level=0, parent=-1)
+    tree = builder.build()
+    assert tree.feature_positions(root_id) is tree.feature_positions(root_id)
+    assert tree.feature_positions(root_id) == tree.features[root_id].elements()
+
 
 # --- CompactSubTree.get_predecessors ---
 

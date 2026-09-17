@@ -127,16 +127,24 @@ class EquivalentProgramExtractor:
             predicate_positions = range(self.internal_encoder.get_n_unary_predicates())
         is_iclr = isinstance(self.external_encoder, ICLREncoderDecoder)
         is_adni = self.use_adni_constraint and isinstance(self.external_encoder, IdentityEncoderDecoder)
+        # Built once, outside the loop below: neither typed_constraint() nor adni_constraint()'s result
+        # depends on which predicate_position is being processed (both are pure functions of the
+        # encoding), so rebuilding one per predicate was pure waste -- and neither compute_tree_for nor
+        # anything it calls ever mutates a TypedConstraint, so sharing this one instance across every
+        # predicate's own TreeShapedConjunction (each of which gets its own, separate caches) is safe.
+        typed_constraint = None
+        if is_iclr:
+            typed_constraint = self.external_encoder.typed_constraint()
+        elif is_adni:
+            typed_constraint = adni_constraint(
+                self.internal_encoder.unary_pred_position_dict, self.internal_encoder.binary_pred_colour_dict)
         for i in predicate_positions:
             if is_iclr:
-                typed_constraints_with_root_type = (
-                    (self.external_encoder.typed_constraint(), self.external_encoder.root_role(i)),)
+                typed_constraints_with_root_type = ((typed_constraint, self.external_encoder.root_role(i)),)
             elif is_adni:
                 # Unlike ICLR22, ADNI's root role never depends on predicate_position: the root is
                 # always ROOT.
-                typed_constraints_with_root_type = (
-                    (adni_constraint(self.internal_encoder.unary_pred_position_dict,
-                                      self.internal_encoder.binary_pred_colour_dict), ADNI_ROOT),)
+                typed_constraints_with_root_type = ((typed_constraint, ADNI_ROOT),)
             else:
                 typed_constraints_with_root_type = ()
             self.base_tree[i], self.var_layer_mask[i] = (

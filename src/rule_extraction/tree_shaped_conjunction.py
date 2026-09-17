@@ -57,6 +57,8 @@ class TreeShapedConjunction:
         self._edge_exclusivity_groups_cache = {}
         self._feature_always_one_positions_cache = {}
         self._edge_always_one_colours_cache = {}
+        self._feature_positions_cache = {}
+        self._empty_compressed_mask_cache = {}
 
         self.parent_edge = [None,] # Auxiliary mapping from a node to its incoming edge
         for var_id in range(1,len(self)):
@@ -113,6 +115,27 @@ class TreeShapedConjunction:
                 c for tc, from_type, to_type in zip(self.typed_constraints, from_types, to_types)
                 for c in tc.get_edge_constraints(from_type, to_type).always_one)
         return self._edge_always_one_colours_cache[key]
+
+    # var_id's own features BitSet, as a plain list of real predicate positions (in ascending order, so
+    # index i is the real position that compressed index i in var_id's own masks stands for). Cached
+    # since BitSet.elements() rescans the whole predicate dimension on every call, and get_successors
+    # would otherwise pay that cost once per candidate successor -- CompactSubTree.get_successors uses
+    # this instead of calling features[var_id].elements() directly for exactly that reason.
+    def feature_positions(self, var_id) -> list:
+        if var_id not in self._feature_positions_cache:
+            self._feature_positions_cache[var_id] = self.features[var_id].elements()
+        return self._feature_positions_cache[var_id]
+
+    # var_id's empty compressed mask (see BitSet.to_empty_compressed), i.e. the starting mask a new
+    # child spawns with. Pre-existing (not something added this week), but on the same hot path:
+    # get_successors calls this once per not-yet-added candidate child, every single time it's called --
+    # for as many search steps as that candidate remains uncommitted -- and to_empty_compressed() is
+    # itself an O(dimension)-ish bin(mask).count("1") scan, so it's worth caching for the same reason as
+    # feature_positions above.
+    def empty_compressed_mask(self, var_id) -> BitSet:
+        if var_id not in self._empty_compressed_mask_cache:
+            self._empty_compressed_mask_cache[var_id] = self.features[var_id].to_empty_compressed()
+        return self._empty_compressed_mask_cache[var_id]
 
     # Takes a variable and returns a TreeShapedConjunction that is the minimal subtree connecting it to the root
     def get_subtree_for(self, var_id: int, ):
@@ -242,12 +265,22 @@ class CompactSubTree:
         for index, var_id in enumerate(self.var_ids):
             groups = base_tree.feature_exclusivity_groups(var_id)
             always_one_positions = base_tree.feature_always_one_positions(var_id)
+            # Hoisted out of the per-successor loop below: feature_positions is cached (see
+            # TreeShapedConjunction.feature_positions), but indexing a fresh BitSet.elements() scan on
+            # every single successor -- as opposed to once per var here -- was itself an O(dimension)
+            # cost paid per candidate, regardless of caching.
+            real_positions = base_tree.feature_positions(var_id)
             if groups:
-                current_positions = set(base_tree.features[var_id].from_compressed(self.masks[index]).elements())
+                # Equivalent to features[var_id].from_compressed(self.masks[index]).elements(), but
+                # from_compressed() internally re-scans the whole predicate dimension too (it calls
+                # BitSet.elements() on `self`, not on the small compressed mask) -- self.masks[index] is
+                # the compressed one, so mapping its (few) set bits through real_positions is equivalent
+                # and doesn't pay that cost again.
+                current_positions = {real_positions[i] for i in self.masks[index].elements()}
             priority, rest = [], []
             for new_mask in self.masks[index].successors():
                 new_compact_pos = self.masks[index].new_elements(new_mask)[0]
-                new_position = base_tree.features[var_id].elements()[new_compact_pos]
+                new_position = real_positions[new_compact_pos]
                 if groups and any(new_position in g and current_positions & g for g in groups):
                     continue
                 successor = CompactSubTree(self.var_ids, self.masks[:index] + (new_mask,) + self.masks[index + 1:])
@@ -283,7 +316,7 @@ class CompactSubTree:
                 if any(colour in g and existing_colours_by_parent[parent_id] & g for g in groups):
                     continue
             new_var_ids = self.var_ids[:j] + (child_id,) + self.var_ids[j:]
-            new_mask = base_tree.features[child_id].to_empty_compressed() # We work with compressed sub-bitsets
+            new_mask = base_tree.empty_compressed_mask(child_id) # We work with compressed sub-bitsets
             new_maskset = self.masks[:j] + (new_mask,) + self.masks[j:]
             successor = CompactSubTree(new_var_ids, new_maskset)
             is_always_one = colour in base_tree.edge_always_one_colours(parent_id, child_id)
