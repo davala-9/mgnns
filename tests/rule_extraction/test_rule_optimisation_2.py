@@ -230,6 +230,46 @@ def test_path_weight_score_fn_requires_a_scored_predecessor():
         score(orphan)
 
 
+def test_prune_to_drops_other_cached_alternatives():
+    # Regression test for GreedyBestSuccessorFrontier's memory/CPU blowup: once a single-path climb
+    # commits to one successor, every discarded sibling's cache entry must actually be forgotten.
+    base_tree = make_tiny_base_tree()
+    weights = {(0, 0): 3.0, (0, 1): 5.0, (1, 0): 7.0}
+    score = path_weight_score_fn(base_tree, weights)
+
+    root = base_tree.initial_compact
+    turn_on_pos0 = next(s for s in root.get_successors(base_tree)
+                       if len(s.var_ids) == 1 and s.masks[0].elements() == [0])
+    turn_on_pos1 = next(s for s in root.get_successors(base_tree)
+                       if len(s.var_ids) == 1 and s.masks[0].elements() == [1])
+    score(turn_on_pos0)
+    score(turn_on_pos1)  # both siblings (and root) cached
+
+    score.prune_to(turn_on_pos0)
+
+    # turn_on_pos1's only predecessor (root) was pruned away, so it can no longer be rescored -- the same
+    # failure mode as test_path_weight_score_fn_requires_a_scored_predecessor, proving the cache was
+    # actually cleared rather than merely left alone.
+    with pytest.raises(AssertionError):
+        score(turn_on_pos1)
+
+
+def test_prune_to_keeps_the_kept_node_scorable_and_climbable():
+    base_tree = make_tiny_base_tree()
+    weights = {(0, 0): 3.0, (0, 1): 5.0, (1, 0): 7.0}
+    score = path_weight_score_fn(base_tree, weights)
+
+    root = base_tree.initial_compact
+    turn_on_pos0 = next(s for s in root.get_successors(base_tree)
+                       if len(s.var_ids) == 1 and s.masks[0].elements() == [0])
+    score(turn_on_pos0)
+    score.prune_to(turn_on_pos0)
+
+    assert score(turn_on_pos0) == pytest.approx(3.0)  # unaffected by pruning itself
+    turn_on_pos1 = next(s for s in turn_on_pos0.get_successors(base_tree) if len(s.var_ids) == 1)
+    assert score(turn_on_pos1) == pytest.approx(8.0)  # climbing onward from the kept node still works
+
+
 # ----------------------------------------------------------------------------------------------------------
 # apply_optimisation: end-to-end
 # ----------------------------------------------------------------------------------------------------------

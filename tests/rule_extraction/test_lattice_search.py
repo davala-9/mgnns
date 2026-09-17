@@ -95,6 +95,26 @@ class TestGreedyBestSuccessorFrontier:
         frontier.push(1)  # not discarded just because it's lower than the previous round's best
         assert frontier.pop() == 1
 
+    def test_pop_calls_prune_to_on_the_score_fn_when_present(self):
+        # See rule_optimisation_2.path_weight_score_fn's prune_to hook: once this frontier commits to an
+        # item, it tells the score_fn so it can forget every discarded alternative's cached score.
+        pruned = []
+
+        def score_fn(x):
+            return x
+        score_fn.prune_to = pruned.append
+
+        frontier = GreedyBestSuccessorFrontier(score_fn=score_fn)
+        frontier.push(3)
+        frontier.push(7)  # new best
+        assert frontier.pop() == 7
+        assert pruned == [7]  # pruned to the WINNER, not every pushed item
+
+    def test_pop_tolerates_a_score_fn_without_prune_to(self):
+        frontier = GreedyBestSuccessorFrontier(score_fn=lambda x: x)
+        frontier.push(3)
+        assert frontier.pop() == 3  # no AttributeError just because plain callables lack prune_to
+
     def test_search_always_follows_the_best_successor_never_backtracking_to_the_rest(self):
         # A node with three successors of differing quality: the search must commit to the best one
         # (worst_first_choice, despite being pushed first) and never fall back to a discarded sibling,
@@ -134,6 +154,33 @@ class TestPriorityFrontier:
         assert frontier.is_empty()
         frontier.push(1)
         assert not frontier.is_empty()
+
+
+class TestSearchDedupOptOut:
+    def test_needs_dedup_defaults(self):
+        assert SinglePathFrontier.needs_dedup is False
+        assert GreedyBestSuccessorFrontier.needs_dedup is False
+        assert BFSFrontier.needs_dedup is True
+        assert PriorityFrontier.needs_dedup is True
+
+    def test_frontiers_that_opt_out_of_dedup_revisit_a_content_equal_node(self):
+        # SinglePathFrontier/GreedyBestSuccessorFrontier never backtrack, so a state can never actually
+        # be revisited on the real (monotonically growing) CompactSubTree lattice -- but this confirms
+        # search() genuinely skips the seen-set bookkeeping for them (rather than it merely never
+        # mattering), by reaching a node equal to one seen earlier via a distinct path.
+        root = FakeSubtree("shared", sound=False)
+        a = FakeSubtree("a", sound=False)
+        duplicate_of_root = FakeSubtree("shared", sound=False)  # == root, but a different object
+        root._successors = [a]
+        a._successors = [duplicate_of_root]
+
+        results = list(search(FakeBaseTree(root), counting_check_soundness, SinglePathFrontier(),
+                              FirstResultPolicy()))
+
+        assert results == []
+        assert root.soundness_calls == 1
+        assert a.soundness_calls == 1
+        assert duplicate_of_root.soundness_calls == 1  # visited despite being == root -- no dedup
 
 
 class TestFirstResultPolicy:

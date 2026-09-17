@@ -96,6 +96,18 @@ def path_weight_score_fn(base_tree: TreeShapedConjunction, weights: dict[tuple[i
             cache[node] = cache[scored_predecessor] + _new_atom_weight(base_tree, weights, scored_predecessor, node)
         return cache[node]
 
+    # Optional hook for a single-path, no-backtracking frontier (see GreedyBestSuccessorFrontier.pop()):
+    # once it commits to `node` as the new expansion point, every other cached entry -- this step's
+    # discarded siblings, and every earlier step's, since such a frontier never returns to them -- can
+    # never be looked up again, so it's safe to drop everything except node's own entry. A caller that
+    # doesn't know about this (e.g. PriorityFrontier, which explores multiple branches and so DOES still
+    # need older entries) simply never calls it, and the cache grows as it always did.
+    def prune_to(node):
+        node_score = cache[node]
+        cache.clear()
+        cache[node] = node_score
+
+    score.prune_to = prune_to
     return score
 
 
