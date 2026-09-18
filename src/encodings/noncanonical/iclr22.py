@@ -6,7 +6,6 @@ from bidict import bidict
 
 from src.rule_extraction.tree_shaped_conjunction import TreeShapedConjunction
 from src.rule_extraction.typed_constraint import TypedConstraint
-from src.utils.bitset import BitSet
 from src.utils.utils import TYPE_PRED
 
 # TODO: create accessors in TreeShapedConjunction so that this ICLR class (and other encoder/decoders) know nothing
@@ -156,71 +155,13 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
                 (ab, self.col3, ba), (ba, self.col3, ab),
                 (a, self.col4, b), (b, self.col4, a)]
 
-    # Given a variable's role and the colour of an edge leaving it, returns the role its child via that
-    # edge must have, or None if the encoding never connects that role to anything via that colour.
-    def _child_role(self, role, bin_pred):
-        if role == self.PAIR:
-            if bin_pred == self.col1: return self.SINGLE
-            if bin_pred == self.col2: return self.SINGLE
-            if bin_pred == self.col3: return self.PAIR
-            return None  # col4: a pair is never connected to anything via col4
-        else:  # role == self.SINGLE
-            if bin_pred == self.col1: return self.PAIR
-            if bin_pred == self.col2: return self.PAIR
-            if bin_pred == self.col4: return self.SINGLE
-            return None  # col3: a single is never connected to anything via col3
-
-    # The role of var_id, found by walking up to the root and propagating roles back down via _child_role.
-    def _role_of(self, builder, var_id, internal_encoder, root_role):
-        if var_id == 0:
-            return root_role
-        parent_role = self._role_of(builder, builder.parent[var_id], internal_encoder, root_role)
-        _, colour, _ = builder.edge_in[var_id]
-        bin_pred = internal_encoder.binary_pred_colour_dict.inverse[colour]
-        return self._child_role(parent_role, bin_pred)
-
     # The role of the tree's root, fixed by the arity (in the data signature) of predicate_position itself.
     def root_role(self, predicate_position):
         return self.PAIR if self.position_arity[predicate_position] == 2 else self.SINGLE
 
-    # A candidate filter (see EquivalentProgramExtractor.candidate_filters): rules out spawning any child
-    # via a colour that the encoding never connects to var_id's role. A no-op on var_id's own features
-    # (colour=None) -- this check is purely about which EDGES are legal, not which features are.
-    def filter_children_by_variable_role(self, builder, var_id, colour, level, mask, internal_encoder,
-                                          predicate_position):
-        if colour is None:
-            return mask
-        role = self._role_of(builder, var_id, internal_encoder, self.root_role(predicate_position))
-        bin_pred = internal_encoder.binary_pred_colour_dict.inverse[colour]
-        if self._child_role(role, bin_pred) is None:
-            return BitSet(mask.dimension, 0)
-        return mask
-
-    # A candidate filter (see EquivalentProgramExtractor.candidate_filters): only at level 0, where
-    # positions are actual canonical unary predicates, restricts them to the arity matching the relevant
-    # variable's role -- var_id's own role for its features (colour=None), or the CHILD's role (var_id's
-    # role propagated through colour) for candidates about to become new children via colour.
-    def filter_features_by_data_arity(self, builder, var_id, colour, level, mask, internal_encoder,
-                                       predicate_position):
-        if level != 0:
-            return mask
-        role = self._role_of(builder, var_id, internal_encoder, self.root_role(predicate_position))
-        if colour is not None:
-            bin_pred = internal_encoder.binary_pred_colour_dict.inverse[colour]
-            role = self._child_role(role, bin_pred)
-            if role is None:
-                return BitSet(mask.dimension, 0)  # already excluded by filter_children_by_variable_role
-        expected_arity = 2 if role == self.PAIR else 1
-        kept = {p for p in mask.elements() if self.position_arity[p] == expected_arity}
-        return BitSet.from_subset(mask.dimension, kept)
-
-    def default_candidate_filters(self) -> list:
-        return [self.filter_children_by_variable_role, self.filter_features_by_data_arity]
-
     # The TypedConstraint describing this encoding's structure: SINGLE nodes represent one data constant,
-    # PAIR nodes represent a pair of them. Mirrors _child_role/filter_features_by_data_arity, but as
-    # declarative data. Feature/edge constraints store actual positions/colours (ints), not predicate
-    # names, so they can be used directly against a BitSet.
+    # PAIR nodes represent a pair of them. Feature/edge constraints store actual positions/colours (ints),
+    # not predicate names, so they can be used directly against a BitSet.
     def typed_constraint(self) -> TypedConstraint:
         tc = TypedConstraint({self.SINGLE, self.PAIR})
 
@@ -242,8 +183,8 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
         for colour in (self.col1, self.col2, self.col4):
             tc.set_edge_never_exists(self.PAIR, self.PAIR, colour_of[colour])
 
-        # Mirrors _child_role: a SINGLE's children via col1/col2 are PAIR, via col4 are SINGLE (col3 never
-        # gives a child). A PAIR's children via col1/col2 are SINGLE, via col3 are PAIR (col4 never gives one).
+        # A SINGLE's children via col1/col2 are PAIR, via col4 are SINGLE (col3 never gives a child).
+        # A PAIR's children via col1/col2 are SINGLE, via col3 are PAIR (col4 never gives one).
         tc.set_child_type(self.SINGLE, colour_of[self.col1], self.PAIR)
         tc.set_child_type(self.SINGLE, colour_of[self.col2], self.PAIR)
         tc.set_child_type(self.SINGLE, colour_of[self.col4], self.SINGLE)

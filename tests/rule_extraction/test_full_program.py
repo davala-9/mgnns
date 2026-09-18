@@ -57,8 +57,7 @@ class FakeInternalEncoder:
 
 
 class FakeExternalEncoder:
-    def default_candidate_filters(self):
-        return []
+    pass
 
 
 def make_extractor(predicate_position, initial_subtree):
@@ -161,10 +160,10 @@ class TestHailMaryFrontier:
 
 
 class TestBinaryPredicateArityBug:
-    # KNOWN BUG (reported against real data), NOW FIXED by ICLREncoderDecoder.filter_children_by_variable_role
-    # and .filter_features_by_data_arity (see EquivalentProgramExtractor.candidate_filters): full-program
-    # extraction could print a body atom like <R>[?X0] even though R is a BINARY predicate in the
-    # signature -- unary syntax, one variable, for a predicate that needs two.
+    # KNOWN BUG (reported against real data), NOW FIXED by ICLREncoderDecoder.typed_constraint() driving
+    # filter_own_features_by_typed_constraints: full-program extraction could print a body atom like
+    # <R>[?X0] even though R is a BINARY predicate in the signature -- unary syntax, one variable, for a
+    # predicate that needs two.
     #
     # Root cause: under the ICLR22 encoding, a canonical variable's structural role -- "pair" (stands
     # for a constant pair, e.g. the root of a binary head) vs "single" (stands for one constant) -- is
@@ -188,12 +187,10 @@ class TestBinaryPredicateArityBug:
     # With the fix, "R" is excluded from the child's candidates outright (wrong arity for a single-typed
     # variable), leaving exactly the one correctly-typed rule.
     #
-    # compute_tree_for's own-feature (level 0) filtering was migrated from self.candidate_filters (which
-    # included ICLREncoderDecoder.filter_features_by_data_arity, the arity check this test guards) to
-    # filter_own_features_by_typed_constraints, driven by the *typed_constraints/var_types it's given.
-    # compute_all_upper_bounds now calls compute_tree_for with ICLR22's typed_constraint() and the right
-    # root role (ICLREncoderDecoder.root_role), so var_types is populated again and the arity constraint
-    # this test guards is back in force.
+    # compute_tree_for's own-feature (level 0) filtering is filter_own_features_by_typed_constraints,
+    # driven by the typed_constraints/var_types it's given. compute_all_upper_bounds calls compute_tree_for
+    # with ICLR22's typed_constraint() and the right root role (ICLREncoderDecoder.root_role), so var_types
+    # is populated and the arity constraint this test guards is enforced.
     def test_does_not_print_a_binary_predicate_with_unary_syntax_in_the_body(self):
         model = GNN(feature_dimension=2, num_edge_colours=4, aggregation_1="max", aggregation_2="max")
         for c in range(4):
@@ -239,10 +236,10 @@ class TestBinaryPredicateArityBug:
 
 
 class TestComputeAllUpperBoundsBuildsTypedConstraintOnce:
-    # Regression test: compute_all_upper_bounds used to call external_encoder.typed_constraint() (and
-    # adni_constraint()) fresh, inside the per-predicate loop, even though the result doesn't depend on
-    # which predicate is being processed -- pure waste, rebuilding the same TypedConstraint from scratch
-    # once per predicate instead of once for the whole call.
+    # Regression test: compute_all_upper_bounds used to call external_encoder.typed_constraint() fresh,
+    # inside the per-predicate loop, even though the result doesn't depend on which predicate is being
+    # processed -- pure waste, rebuilding the same TypedConstraint from scratch once per predicate instead
+    # of once for the whole call.
     def test_typed_constraint_is_built_once_not_once_per_predicate(self, monkeypatch):
         model = GNN(feature_dimension=2, num_edge_colours=4, aggregation_1="max", aggregation_2="max")
         external_encoder = ICLREncoderDecoder(load_from_document=None, unary_predicates=["A"],

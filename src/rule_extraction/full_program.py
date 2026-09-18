@@ -2,9 +2,7 @@ from typing import Callable
 
 from src.encodings.canonical import CanonicalEncoderDecoder
 from src.encodings.noncanonical.iclr22 import ICLREncoderDecoder
-from src.encodings.noncanonical.identity import IdentityEncoderDecoder
 from src.encodings.noncanonical.noncanonical import NonCanonicalEncoder
-from src.rule_extraction.constraints.adni import adni_constraint, ROOT as ADNI_ROOT
 from src.rule_extraction.lattice_search import (
     Frontier, BFSFrontier, SinglePathFrontier, GreedyBestSuccessorFrontier, AllMinimalPolicy, FirstResultPolicy,
     search,
@@ -27,23 +25,12 @@ def filter_own_features_by_typed_constraints(mask, var_id, typed_constraints, va
 class EquivalentProgramExtractor:
 
     def __init__(self, device, model, threshold, external_encoder: NonCanonicalEncoder,
-                 internal_encoder: CanonicalEncoderDecoder, candidate_filters: list[Callable] = None,
-                 use_adni_constraint: bool = False):
+                 internal_encoder: CanonicalEncoderDecoder):
         self.device = device
         self.model = model
         self.threshold = threshold
         self.external_encoder = external_encoder
         self.internal_encoder = internal_encoder
-        # Only meaningful when external_encoder is an IdentityEncoderDecoder: the ADNI dataset's structure
-        # (src/rule_extraction/constraints/adni.py) isn't implied by the encoding itself the way ICLR22's
-        # is, so it has to be opted into explicitly (see compute_all_upper_bounds).
-        self.use_adni_constraint = use_adni_constraint
-        # Each filter: (builder, var_id, colour, level, mask, internal_encoder, predicate_position) -> mask,
-        # applied in order in compute_tree_for to narrow relevant-position masks before they're used, either
-        # for var_id's own features (colour=None) or for children spawned from var_id via colour. Always
-        # includes whatever the encoding itself wants (see NonCanonicalEncoder.default_candidate_filters);
-        # candidate_filters, if given, adds to those rather than replacing them.
-        self.candidate_filters = external_encoder.default_candidate_filters() + (candidate_filters or [])
         self.base_tree: dict[int, TreeShapedConjunction] = {}
         self.var_layer_mask: dict[int, dict] = {}  # needed to compute atom_weights() for the Hail Mary heuristic
         self._atom_weight_cache: dict[int, dict] = {}
@@ -126,25 +113,17 @@ class EquivalentProgramExtractor:
         if predicate_positions is None:
             predicate_positions = range(self.internal_encoder.get_n_unary_predicates())
         is_iclr = isinstance(self.external_encoder, ICLREncoderDecoder)
-        is_adni = self.use_adni_constraint and isinstance(self.external_encoder, IdentityEncoderDecoder)
-        # Built once, outside the loop below: neither typed_constraint() nor adni_constraint()'s result
-        # depends on which predicate_position is being processed (both are pure functions of the
-        # encoding), so rebuilding one per predicate was pure waste -- and neither compute_tree_for nor
-        # anything it calls ever mutates a TypedConstraint, so sharing this one instance across every
-        # predicate's own TreeShapedConjunction (each of which gets its own, separate caches) is safe.
+        # Built once, outside the loop below: typed_constraint()'s result doesn't depend on which
+        # predicate_position is being processed (it's a pure function of the encoding), so rebuilding it
+        # per predicate was pure waste -- and neither compute_tree_for nor anything it calls ever mutates
+        # a TypedConstraint, so sharing this one instance across every predicate's own TreeShapedConjunction
+        # (each of which gets its own, separate caches) is safe.
         typed_constraint = None
         if is_iclr:
             typed_constraint = self.external_encoder.typed_constraint()
-        elif is_adni:
-            typed_constraint = adni_constraint(
-                self.internal_encoder.unary_pred_position_dict, self.internal_encoder.binary_pred_colour_dict)
         for i in predicate_positions:
             if is_iclr:
                 typed_constraints_with_root_type = ((typed_constraint, self.external_encoder.root_role(i)),)
-            elif is_adni:
-                # Unlike ICLR22, ADNI's root role never depends on predicate_position: the root is
-                # always ROOT.
-                typed_constraints_with_root_type = ((typed_constraint, ADNI_ROOT),)
             else:
                 typed_constraints_with_root_type = ()
             self.base_tree[i], self.var_layer_mask[i] = (

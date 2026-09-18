@@ -57,10 +57,4 @@ class NonCanonicalEncoder(ABC):
                head_predicate: str, grounding_context: GroundContext):
         pass
 
-    # The candidate filters (see EquivalentProgramExtractor.candidate_filters) this encoding wants applied
-    # by default in compute_tree_for, when the caller doesn't explicitly choose its own. No encoding-specific
-    # restrictions by default -- override where an encoding has some (e.g. ICLREncoderDecoder).
-    def default_candidate_filters(self) -> list:
-        return []
-
 
