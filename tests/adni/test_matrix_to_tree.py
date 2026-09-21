@@ -1,6 +1,6 @@
 import pytest
 
-from src.adni.matrix_to_tree import matrix_to_tree, node_predicate_for, colour_predicate_for
+from src.adni.matrix_to_tree import infer_dimensions, matrix_to_tree, node_predicate_for, colour_predicate_for
 from src.adni.sparse_triangular_matrix import SparseTriangularMatrix
 from src.encodings.canonical import CanonicalEncoderDecoder
 
@@ -9,6 +9,18 @@ def make_internal_encoder(d, max_value):
     unary = ["node"] + [node_predicate_for(k) for k in range(d)]
     binary = ["part_of"] + [colour_predicate_for(v) for v in range(1, max_value + 1)]
     return CanonicalEncoderDecoder(unary_predicates=unary, binary_predicates=binary)
+
+
+def test_infer_dimensions_recovers_d_and_max_value():
+    encoder = make_internal_encoder(d=4, max_value=3)
+    assert infer_dimensions(encoder) == (4, 3)
+
+
+def test_infer_dimensions_on_an_encoder_with_extra_unrelated_predicates():
+    unary = ["node", node_predicate_for(0), node_predicate_for(1), "positive", "some_other_predicate"]
+    binary = ["part_of", colour_predicate_for(1), "some_other_colour"]
+    encoder = CanonicalEncoderDecoder(unary_predicates=unary, binary_predicates=binary)
+    assert infer_dimensions(encoder) == (2, 1)
 
 
 def test_root_has_no_unary_predicate():
@@ -82,3 +94,25 @@ def test_empty_matrix_has_no_extra_edges_beyond_part_of():
     assert tree.children[1] == {}
     assert tree.children[2] == {}
     assert tree.children[3] == {}
+
+def test_included_nodes_excludes_the_others_entirely():
+    matrix = SparseTriangularMatrix.empty(d=3, max_value=2).with_value(0, 2, 1)
+    encoder = make_internal_encoder(d=3, max_value=2)
+    tree = matrix_to_tree(matrix, encoder, included_nodes={0, 2})
+    # root (0) plus only node_0 and node_2 -- node_1 is left out entirely.
+    assert len(tree) == 3
+    node_0_id, node_2_id = 1, 2
+    part_of_colour = encoder.binary_pred_colour_dict["part_of"]
+    value_1_colour = encoder.binary_pred_colour_dict["1.0"]
+    assert tree.parent[node_0_id] == 0 and tree.parent[node_2_id] == 0
+    assert tree.children[0] == {(1, part_of_colour, 0): node_0_id, (1, part_of_colour, 2): node_2_id}
+    assert tree.children[node_0_id] == {(0, value_1_colour, 2): node_2_id}
+    assert set(tree.features[node_0_id].elements()) == {
+        encoder.unary_pred_position_dict["node"], encoder.unary_pred_position_dict["node_0"]}
+
+def test_included_nodes_drops_matrix_entries_touching_an_excluded_node():
+    matrix = SparseTriangularMatrix.empty(d=3, max_value=2).with_value(0, 1, 1)
+    encoder = make_internal_encoder(d=3, max_value=2)
+    tree = matrix_to_tree(matrix, encoder, included_nodes={0, 2})  # excludes node_1, the entry's target
+    node_0_id = 1
+    assert tree.children[node_0_id] == {}
