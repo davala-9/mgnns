@@ -17,19 +17,22 @@ EARLY_STOPPING_PATIENCE = 50  # stop after this many consecutive epochs without 
 REPORT_EVERY_N_EPOCHS = 200
 CHECKPOINT_EVERY_N_EPOCHS = 1000
 
+# The training targets: a |nodes| x delta matrix with a 1 for each training example (a unary fact over the
+# (col,d)-signature) and 0 everywhere else.
+def build_training_labels(cd_graph: CDGraph, internal_encoder: CanonicalEncoderDecoder, train_examples):
+    train_y = torch.zeros_like(cd_graph.features)
+    for s, p, o in train_examples:
+        # We drop examples mentioning constants not in the training graph. Note that if we use ICLR as external
+        # decoder, this means dropping all facts of the form R(a,b) where a and b never occur together in it.
+        if p == TYPE_PRED and s in cd_graph.node_names_to_indices:
+            train_y[cd_graph.node_names_to_indices[s]][internal_encoder.unary_pred_position_dict[o]] = 1
+    return train_y
+
+
 def train(cfg: ExperimentConfig, device, internal_encoder: CanonicalEncoderDecoder, model,
           cd_graph: CDGraph, train_examples, experiment_folder) :
 
-    # Create positive examples for training
-    train_y = torch.zeros_like(cd_graph.features)
-    examples_excluded = 0
-    for s, p, o in train_examples:
-        if p == TYPE_PRED and s in cd_graph.node_names:
-            train_y[cd_graph.node_names.index(s)][internal_encoder.unary_pred_position_dict[o]] = 1
-        else:
-            # We drop cd_examples mentioning new constants. Note that if we use ICLR as external decoder, this means
-            # dropping all facts of the form R(a,b) where a and b never occur together in the training set.
-            examples_excluded += 1
+    train_y = build_training_labels(cd_graph, internal_encoder, train_examples)
 
     # Convert to PyTorch Geometric Data objects
     # Data: "A plain old python object modeling a single graph with various (optional) attributes"
