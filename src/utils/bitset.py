@@ -1,7 +1,5 @@
 from dataclasses import dataclass
 
-from sympy.codegen.fnodes import dimension
-
 
 @dataclass(frozen=True,slots=True)
 class BitSet:

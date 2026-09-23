@@ -7,7 +7,6 @@ from numpy import arange
 from numpy import trapezoid
 from numpy import nan_to_num
 from src.utils.data_parser import parse
-import os.path
 from src.utils.utils import check
 
 
@@ -104,5 +103,3 @@ def compute_metrics(predictions, positive_examples, negative_examples, metrics_f
         recall_vector = nan_to_num(recall_vector)
         precision_vector = nan_to_num(precision_vector)
         f.write("Area under precision recall curve: {}\n".format(auprc(precision_vector, recall_vector)))
-
-    f.close()

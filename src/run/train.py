@@ -5,7 +5,8 @@
 """
 
 import torch
-from torch_geometric.data import Data, DataLoader
+from torch_geometric.data import Data
+from torch_geometric.loader import DataLoader
 import os.path
 from src.encodings.canonical import CanonicalEncoderDecoder
 from src.config.config import ExperimentConfig

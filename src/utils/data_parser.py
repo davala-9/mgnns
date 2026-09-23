@@ -11,8 +11,8 @@ def parse_as_nt(file):
 
 
 def parse_as_tsv(file):
-    inputfile = open(file, "r")
-    lines = inputfile.readlines()
+    with open(file, "r") as inputfile:
+        lines = inputfile.readlines()
     dataset = []
     for line in lines:
         ent1, ent2, ent3 = line.split()

@@ -4,8 +4,6 @@ from src.rule_extraction.tree_shaped_conjunction import TreeShapedConjunction
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
-ineq_pred = "owl:differentFrom"
-
 # This is an auxiliary class for the "unfold" method. It helps unfold a rule that can be grounded on a specific fact.
 @dataclass
 class GroundContext:
@@ -15,8 +13,8 @@ class GroundContext:
 
 class NonCanonicalEncoder(ABC):
 
-    canonical_unary_predicates = list
-    canonical_binary_predicates = list
+    canonical_unary_predicates: list
+    canonical_binary_predicates: list
 
     @abstractmethod
     def encode_dataset(self, dataset: set[tuple], **kwargs) -> set[tuple]:

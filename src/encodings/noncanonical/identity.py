@@ -9,7 +9,9 @@ class IdentityEncoderDecoder(NonCanonicalEncoder):
         self.canonical_unary_predicates = []
         self.canonical_binary_predicates = []
         if load_from_document is not None:
-            for line in open(load_from_document, 'r').readlines():
+            with open(load_from_document, 'r') as input_file:
+                lines = input_file.readlines()
+            for line in lines:
                 predicate, _, arity = line.split() # predicates are duplicate so we ignore the second
                 arity = int(arity)
                 if arity == 1:
@@ -36,12 +38,11 @@ class IdentityEncoderDecoder(NonCanonicalEncoder):
 
     # Save format (predicate \t new_predicate \t arity)
     def save_to_file(self, target_file):
-        output = open(target_file, 'w')
-        for predicate in self.canonical_unary_predicates:
-            output.write("{}\t{}\t{}\n".format(predicate, predicate, 1))
-        for predicate in self.canonical_binary_predicates:
-            output.write("{}\t{}\t{}\n".format(predicate, predicate, 2))
-        output.close()
+        with open(target_file, 'w') as output:
+            for predicate in self.canonical_unary_predicates:
+                output.write("{}\t{}\t{}\n".format(predicate, predicate, 1))
+            for predicate in self.canonical_binary_predicates:
+                output.write("{}\t{}\t{}\n".format(predicate, predicate, 2))
 
     def get_canonical_equivalent(self, fact):
         s, p, o = fact

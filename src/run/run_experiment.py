@@ -1,7 +1,4 @@
-from base64 import encode
-
 import torch
-from torch_geometric.data import Data, DataLoader
 import argparse
 
 from src.rule_extraction.full_program import EquivalentProgramExtractor
@@ -16,7 +13,7 @@ from src.run.train import train
 from src.run.compute_metrics import compute_metrics
 from src.rule_extraction.fact_explanation import FactExplainer
 from src.model.gnn_architectures import GNN
-from src.model.cd_graph import CDGraph, TraceCollector
+from src.model.cd_graph import TraceCollector
 from datetime import datetime
 from pathlib import Path
 import shutil
@@ -26,7 +23,6 @@ def create_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument("config_file", help='Path of the configuration file controlling the experiment.')
     parser.add_argument("--load-model", help='Use existing model')
-    parser.add_argument("--minimal", action="store_true", help="Minimise explanatory rules")
     parser.add_argument("--skip-program", action="store_true", help="Skip equivalent program extraction")
     return parser
 
@@ -126,7 +122,6 @@ def save_predictions(ef, predictions):
     with open(derivations_file_scored, 'w') as output2:
         for (score, (s, p, o)) in to_print:
             output2.write("{}\t{}\t{}\t{}\n".format(s, p, o, score))
-    output.close()
 
 def extract_program(ef, device, model, threshold, external_encoder, internal_encoder, predicate=None):
     print("Computing full equivalent program...")
@@ -149,7 +144,6 @@ def explain_facts(ef,predictions,device,model,cfg,trace,external_encoder, intern
             rule = explainer.explain_fact(fact)
             output.write("{}\n".format(fact))
             output.write(rule + '\n')
-    output.close()
 
 if __name__ == "__main__":
     parser = create_parser()

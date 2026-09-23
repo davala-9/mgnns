@@ -29,7 +29,9 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
         if load_from_document is not None:
             self.data_unary_predicates = []
             self.data_binary_predicates = []
-            for line in open(load_from_document, 'r').readlines():
+            with open(load_from_document, 'r') as input_file:
+                lines = input_file.readlines()
+            for line in lines:
                 input_predicate, canonical_predicate, arity = line.split()
                 self.data_pred_to_unary_canonical[input_predicate] = canonical_predicate
                 self.data_pred_to_arity[input_predicate] = int(arity)
@@ -58,12 +60,11 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
 
     # Save format (predicate \t new_predicate \t arity)
     def save_to_file(self, target_file):
-        output = open(target_file, 'w')
-        for input_predicate in self.data_pred_to_unary_canonical:
-            output.write("{}\t{}\t{}\n".format(input_predicate,
-                                               self.data_pred_to_unary_canonical[input_predicate],
-                                               self.data_pred_to_arity[input_predicate]))
-        output.close()
+        with open(target_file, 'w') as output:
+            for input_predicate in self.data_pred_to_unary_canonical:
+                output.write("{}\t{}\t{}\n".format(input_predicate,
+                                                   self.data_pred_to_unary_canonical[input_predicate],
+                                                   self.data_pred_to_arity[input_predicate]))
 
     def term_for_pair(self, pair):
         if pair not in self.pair_term_dict:
@@ -121,10 +122,6 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
     def unary_can_predicate_to_data_predicate_arity(self, predicate: str):
         return self.data_pred_to_arity[
             self.data_pred_to_unary_canonical.inverse[predicate]]
-
-    # The arity, in the data signature, of the predicate that lives at this canonical unary predicate position.
-    def arity_of_position(self, position: int) -> int:
-        return self.position_arity[position]
 
     def decode_dataset(self, canonical_dataset):
         return {decoded for s, p, o in canonical_dataset
