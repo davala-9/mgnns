@@ -165,4 +165,4 @@ if __name__ == "__main__":
         extract_program(exp_folder, device, model, cfg.derivation_threshold, external_encoder, internal_encoder)
     explain_facts(exp_folder,predictions,device,model,cfg,trace,external_encoder, internal_encoder, test_graph_dataset)
 
-# TODO: Separate responsabilities better in the test method.
+# TODO: Separate responsibilities better in the test method.

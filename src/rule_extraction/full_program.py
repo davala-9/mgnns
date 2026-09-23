@@ -91,7 +91,8 @@ class EquivalentProgramExtractor:
                                 BitSet.from_subset(self.model.layer_dimension(l - 1), {j})
                             var_types[new_var_id] = child_types
 
-        # Next, consider the non-deterministic version of having multiple trees to turn combinatorial explosion into linear
+        # TODO: consider the non-deterministic version of having multiple trees, to turn combinatorial explosion
+        #  into linear
 
         for var_id in range(explanation_builder.num_vars()):  # Add the atoms for the feature vectors in layer 0
             # Needs to be done separately, otherwise this is not done to the new variables added!
@@ -114,11 +115,8 @@ class EquivalentProgramExtractor:
         if predicate_positions is None:
             predicate_positions = range(self.internal_encoder.get_n_unary_predicates())
         is_iclr = isinstance(self.external_encoder, ICLREncoderDecoder)
-        # Built once, outside the loop below: typed_constraint()'s result doesn't depend on which
-        # predicate_position is being processed (it's a pure function of the encoding), so rebuilding it
-        # per predicate was pure waste -- and neither compute_tree_for nor anything it calls ever mutates
-        # a TypedConstraint, so sharing this one instance across every predicate's own TreeShapedConjunction
-        # (each of which gets its own, separate caches) is safe.
+        # The TypedConstraint depends only on the encoding, not on the predicate, so one instance is built and
+        # shared by every predicate's tree (nothing downstream mutates it).
         typed_constraint = None
         if is_iclr:
             typed_constraint = self.external_encoder.typed_constraint()
@@ -146,10 +144,8 @@ class EquivalentProgramExtractor:
         weights = self.atom_weights(predicate_position)
         return GreedyBestSuccessorFrontier(path_weight_score_fn(self.base_tree[predicate_position], weights))
 
-    # Explores the lattice of subtrees of the base_tree, looking for every inclusion-minimal sound
-    # one. Which order the lattice gets explored in is controlled by `frontier_factory` (default:
-    # the original level-by-level BFS order) -- swap it to try other exploration strategies.
-    # Works as a generator function
+    # Explores the lattice of subtrees of the base_tree, yielding every inclusion-minimal sound one (a
+    # generator). The exploration order is controlled by `frontier_factory` (default: level-by-level BFS).
     def extract_smallest_rules_for(self, predicate_position, deadline,
                                    frontier_factory: Callable[[], Frontier] = BFSFrontier):
         pred = self.internal_encoder.unary_pred_position_dict.inverse[predicate_position]

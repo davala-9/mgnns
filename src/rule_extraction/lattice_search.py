@@ -5,13 +5,12 @@ from typing import Callable, Protocol
 from src.rule_extraction.tree_shaped_conjunction import CompactSubTree, TreeShapedConjunction
 
 
-# Shared traversal engine for searching the lattice of CompactSubTrees of a TreeShapedConjunction,
+# Shared traversal engine for searching the lattice of CompactSubTrees of a TreeShapedConjunction: search()
+# does the traversal, a Frontier decides the exploration order, and a ResultPolicy decides what to keep.
 
 class Frontier(Protocol):
-    # Whether search() needs to track every pushed CompactSubTree in a `seen` set to avoid revisiting one
-    # reachable via more than one path (e.g. adding atom A then B vs. B then A). True unless a Frontier
-    # overrides it -- only single-path greedy climbs (no backtracking, so no path can ever reconverge)
-    # can safely say False.
+    # Whether search() needs a `seen` set to avoid revisiting a CompactSubTree reachable via more than one path
+    # (e.g. adding atom A then B vs. B then A). Only single-path greedy climbs can safely say False.
     needs_dedup: bool = True
     def push(self, item: CompactSubTree) -> None: ...
     def pop(self) -> CompactSubTree: ...
@@ -22,9 +21,7 @@ class SinglePathFrontier:
     """Keeps only the first item pushed since the last pop, turning the search into a single greedy
     path climb: at each node, commit to its first successor (in get_successors() order) and ignore the
     rest -- mirroring next(node.get_successors(base_tree), None)."""
-    # A single monotonically-growing path can never revisit a state (every successor is strictly bigger
-    # than its predecessor), so search()'s seen-set dedup would never actually trigger here -- skip it.
-    needs_dedup = False
+    needs_dedup = False  # a single growing path can never revisit a state
     def __init__(self):
         self._item: CompactSubTree | None = None
     def push(self, item: CompactSubTree) -> None:
@@ -45,8 +42,7 @@ class GreedyBestSuccessorFrontier:
     expanded, it keeps only the highest-scoring one (by `score_fn`) and discards the rest right away,
     so they're never explored. That one successor is then, in turn, expanded the same way -- always one
     atom added per step, never backtracking to a discarded alternative."""
-    # Same reasoning as SinglePathFrontier.needs_dedup: a single growing path can't revisit a state.
-    needs_dedup = False
+    needs_dedup = False  # a single growing path can never revisit a state
     def __init__(self, score_fn: Callable[[CompactSubTree], float]):
         self._score_fn = score_fn
         self._best_item: CompactSubTree | None = None
@@ -59,9 +55,8 @@ class GreedyBestSuccessorFrontier:
         item = self._best_item
         assert item is not None
         self._best_item, self._best_score = None, float("-inf")
-        # If score_fn exposes a prune_to hook (see rule_optimisation_2.path_weight_score_fn), tell it
-        # we've committed to item: every other alternative it may have cached is now unreachable, since
-        # this frontier never backtracks to a discarded successor.
+        # If score_fn has a prune_to hook (see rule_optimisation_2.path_weight_score_fn), tell it we've committed
+        # to item, so it can drop what it cached for the discarded alternatives.
         prune_to = getattr(self._score_fn, "prune_to", None)
         if prune_to is not None:
             prune_to(item)

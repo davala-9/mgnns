@@ -1,13 +1,6 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
-
-This file contains the GNN architecture, as the GNN class.
-One of the fundamental steps in the GNN's update rule is the
-use of an appropriate convolution. We define 2 convolutions,
-one for coloured edges, and one for colourless edges.
-
-@author: ----
+This file contains the GNN architecture, as the GNN class. Each of its two layers combines a self-update
+(a linear layer, matrix A) with EC_GCNConv, a convolution with one matrix B per edge colour.
 """
 import torch
 

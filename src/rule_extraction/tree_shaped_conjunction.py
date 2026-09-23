@@ -24,11 +24,9 @@ class TreeShapedConjunctionBuilder:
         return i
 
     def num_vars(self):
-            return len(self.features)
+        return len(self.features)
 
-    # typed_constraints/var_types: see TreeShapedConjunction -- passed in at build time (rather than
-    # tracked by the builder itself) since compute_tree_for already assembles var_types as it spawns
-    # each variable.
+    # typed_constraints/var_types: see TreeShapedConjunction.
     def build(self, typed_constraints: tuple = (), var_types: dict = None):
         return TreeShapedConjunction( self.n_colours,
             tuple(self.features), tuple(self.levels),
@@ -50,9 +48,8 @@ class TreeShapedConjunction:
         # edge_exclusivity_groups below), not by compute_tree_for itself.
         self.typed_constraints = typed_constraints
         self.var_types = var_types if var_types is not None else {}
-        # Caches for the four methods below: each depends only on var_id/pair plus typed_constraints/
-        # var_types, both fixed for this tree's lifetime, so there's no point recomputing them every time
-        # CompactSubTree.get_successors is called for the same var_id/pair across many search steps.
+        # Caches for the per-variable lookups below, which CompactSubTree.get_successors calls on every search
+        # step. The tree is immutable, so their results never change.
         self._feature_exclusivity_groups_cache = {}
         self._edge_exclusivity_groups_cache = {}
         self._feature_always_one_positions_cache = {}
@@ -116,22 +113,15 @@ class TreeShapedConjunction:
                 for c in tc.get_edge_constraints(from_type, to_type).always_one)
         return self._edge_always_one_colours_cache[key]
 
-    # var_id's own features BitSet, as a plain list of real predicate positions (in ascending order, so
-    # index i is the real position that compressed index i in var_id's own masks stands for). Cached
-    # since BitSet.elements() rescans the whole predicate dimension on every call, and get_successors
-    # would otherwise pay that cost once per candidate successor -- CompactSubTree.get_successors uses
-    # this instead of calling features[var_id].elements() directly for exactly that reason.
+    # var_id's features, as an ascending list of real predicate positions: index i is the real position that
+    # compressed index i in var_id's CompactSubTree masks stands for. Cached version of features[var_id].elements().
     def feature_positions(self, var_id) -> list:
         if var_id not in self._feature_positions_cache:
             self._feature_positions_cache[var_id] = self.features[var_id].elements()
         return self._feature_positions_cache[var_id]
 
-    # var_id's empty compressed mask (see BitSet.to_empty_compressed), i.e. the starting mask a new
-    # child spawns with. Pre-existing (not something added this week), but on the same hot path:
-    # get_successors calls this once per not-yet-added candidate child, every single time it's called --
-    # for as many search steps as that candidate remains uncommitted -- and to_empty_compressed() is
-    # itself an O(dimension)-ish bin(mask).count("1") scan, so it's worth caching for the same reason as
-    # feature_positions above.
+    # var_id's empty compressed mask (see BitSet.to_empty_compressed), i.e. the mask a newly added child starts
+    # with. Cached version of features[var_id].to_empty_compressed().
     def empty_compressed_mask(self, var_id) -> BitSet:
         if var_id not in self._empty_compressed_mask_cache:
             self._empty_compressed_mask_cache[var_id] = self.features[var_id].to_empty_compressed()
@@ -254,28 +244,18 @@ class CompactSubTree:
 
     def get_successors(self, base_tree):
         var_id_set = set(self.var_ids)
-        # First get successors obtained by flipping a 0 to a 1 in the mask of an existing node -- skipped
-        # when it would set a second member of a feature exclusivity group that already has a member set
-        # (see TypedConstraint.feature_exclusivity_groups): that combination is structurally impossible,
-        # so there's no point spending a soundness check on it. Among the rest, a flip that sets an
-        # always_one position (guaranteed true, so likely to move towards a sound state -- see
-        # TreeShapedConjunction.feature_always_one_positions) is yielded before the others. Both of these
-        # only reorder/remove what's already offered -- never more than one atom added per step, so
-        # get_predecessors/_new_atom_weight need no changes.
+        # First, successors obtained by flipping a 0 to a 1 in the mask of an existing node. A flip is skipped
+        # if it would set a second member of a feature exclusivity group (see TypedConstraint.
+        # feature_exclusivity_groups), since that combination is structurally impossible. Flips that set an
+        # always_one position are yielded first, since they are likely to move towards a sound state.
+        # Every successor adds exactly one atom.
         for index, var_id in enumerate(self.var_ids):
             groups = base_tree.feature_exclusivity_groups(var_id)
             always_one_positions = base_tree.feature_always_one_positions(var_id)
-            # Hoisted out of the per-successor loop below: feature_positions is cached (see
-            # TreeShapedConjunction.feature_positions), but indexing a fresh BitSet.elements() scan on
-            # every single successor -- as opposed to once per var here -- was itself an O(dimension)
-            # cost paid per candidate, regardless of caching.
             real_positions = base_tree.feature_positions(var_id)
             if groups:
-                # Equivalent to features[var_id].from_compressed(self.masks[index]).elements(), but
-                # from_compressed() internally re-scans the whole predicate dimension too (it calls
-                # BitSet.elements() on `self`, not on the small compressed mask) -- self.masks[index] is
-                # the compressed one, so mapping its (few) set bits through real_positions is equivalent
-                # and doesn't pay that cost again.
+                # The real positions currently set, i.e. features[var_id].from_compressed(mask).elements(), but
+                # without rescanning the whole predicate dimension.
                 current_positions = {real_positions[i] for i in self.masks[index].elements()}
             priority, rest = [], []
             for new_mask in self.masks[index].successors():
@@ -287,19 +267,16 @@ class CompactSubTree:
                 (priority if new_position in always_one_positions else rest).append(successor)
             yield from priority
             yield from rest
-        # Next, get successors obtained by adding a NEW child -- skipped when it would connect a second
-        # child within an edge exclusivity group that already has a connected child (see TypedConstraint.
-        # edge_exclusivity_groups). Among the rest, a new child connected via an always_one colour (see
-        # TreeShapedConjunction.edge_always_one_colours) is yielded before the others, for the same reason
-        # as above.
+        # Next, successors obtained by adding a NEW child (with an empty mask). A child is skipped if it would
+        # connect a second child within an edge exclusivity group (see TypedConstraint.edge_exclusivity_groups).
+        # Children connected via an always_one colour are yielded first, for the same reason as above.
         added_children = set() # First we extract all new nodes that need to be added
         added_children.update(child_id for var_id in self.var_ids for child_id in base_tree.children[var_id].values())
         added_children.difference_update(self.var_ids) # Remove those that are already present in the subtree
         added_children = sorted(added_children) # Sorted in ascending order
         existing_colours_by_parent = {}  # parent var_id -> colours of its children already in this subtree
         priority, rest = [], []
-        # Efficient generation of the new CompactSubTrees in one pass through both tuples (buffered into
-        # priority/rest so the always_one reordering doesn't need a second pass, just a delayed yield)
+        # One pass through both sorted tuples, finding where each child's id goes in self.var_ids
         j = 0 # iteration over var_ids in this tree
         for child_id in added_children:
             while j < len(self.var_ids) and self.var_ids[j] < child_id:
