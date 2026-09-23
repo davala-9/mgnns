@@ -1,31 +1,38 @@
-This file explains how to use our implementation of monotonic GNNs. Please check the help command in each script for further details. This project is licensed under the Apache License 2.0 – see the LICENSE file for details.
+# MGNNs
 
-# MGNNs 
+This repository implements monotonic graph neural networks (MGNNs) over multi-relational graphs, together with
+algorithms that extract Datalog rules from a trained model: both rules that explain individual predictions and
+(attempts at) a whole program equivalent to the model. This project is licensed under the Apache License 2.0 – see
+the LICENSE file for details.
 
-This code requires [PyTorch](https://pytorch.org/) and [PyTorch Geometric](https://github.com/rusty1s/pytorch_geometric); it was tested with Python 3.9.6, PyTorch v2.8.0 and PyTorch Geometric v2.6.1. 
+## Installation
 
-## Directory Structure
-
-The following basic directory structure is required to run our implementation of MGNNs:
+The code requires [PyTorch](https://pytorch.org/) and [PyTorch Geometric](https://github.com/rusty1s/pytorch_geometric),
+plus a few smaller packages:
 
 ```bash
-.
-├── data
-├── src
-└── experiments
-
+pip install -r requirements.txt
 ```
 
-The `./data` folder contains the _dataset folders_, which in turn contain training, validation, and testing data.
+It requires Python 3.10 or later, and has been tested with Python 3.13, PyTorch 2.12 and PyTorch Geometric 2.8.
 
-The `./src` folder contains the Python scripts that implement and run our system. 
+All commands below are run from the repository root, as modules (`python -m src.run.<script>`), so that the
+`src.` imports resolve. Each script supports `--help`.
 
-The `./experiments` folder contains the configuration and output of each experiment that has been run. 
+## Directory structure
 
+```
+.
+├── configs        # Experiment configuration files (see "Configuration" below)
+├── data           # Dataset folders (see "Data format" below)
+├── experiments    # One output folder per experiment run
+├── src            # The implementation (see "Code map" below)
+└── tests          # Unit tests, mirroring the layout of src
+```
 
-## Data Structure
+## Data format
 
-Each benchmark/dataset should consist of a single folder with the following files:
+Each dataset is a single folder with the following files:
 
 ```
 dataset_name
@@ -40,57 +47,161 @@ dataset_name
 └── test_neg.tsv
 ```
 
-The `predicates.csv` file is a comma-separated file where each line corresponds a predicate in the signature. The line format is "[predicate name],[arity]" where the arity is either 1 or 2.
+- `predicates.csv` lists the signature, one predicate per line, as `[predicate name],[arity]` where the arity is 1 or 2.
+  The order of the lines matters: it fixes the order of the model's feature positions and edge colours.
+- `train_graph.tsv`, `valid_graph.tsv` and `test_graph.tsv` are the input graphs fed into the model for training,
+  validation and testing.
+- `train_pos.tsv`, `valid_pos.tsv` and `test_pos.tsv` are the positive examples for training, validation and testing.
+- `valid_neg.tsv` and `test_neg.tsv` are the negative examples for validation and testing. There are no negative
+  examples for training: every fact not in `train_pos.tsv` is treated as negative during training.
 
-The `train_graph.tsv`, `valid_graph.tsv`, and `test_graph.tsv` files contain the input graph that will be fed into the model for training, validation, and testing, respectively.
+Each line of a tsv file is one fact `[subject]\t[relation]\t[object]`. Unary facts use
+`http://www.w3.org/1999/02/22-rdf-syntax-ns#type` as the relation, with the unary predicate as the object. Every
+predicate used (the relation of a binary fact, or the object of a unary fact) **must** appear in `predicates.csv` with
+the matching arity. There is no list of entity names: the system works in the inductive setting, so validation and
+test files may mention entities never seen during training.
 
-The `train_pos.tsv`, `valid_pos.tsv`, and `test_pos.tsv` files contain the positive examples for training, validation, and testing, respectively.
+The scripts in `src/utils/` (`split_dataset.py`, `convert_examples_from_rgcn_format.py`,
+`extract_predicates_from_graph_and_examples.py`, `generate_negatives_for_classification.py`) are one-off helpers that
+were used to build some of the datasets in `data/` from other formats.
 
-The `valid_neg.tsv`, `test_pos.tsv` files contain the negative examples for validation and testing. Note that there are no negative examples for training: all facts not in train_pos.tsv are assumed to be negative for training purposes.
+## Configuration
 
-In each tsv file, each line corresponds to a single fact of the form "[subject]\t[relation]\t[object]". For unary files, the [relation] must be `http://www.w3.org/1999/02/22-rdf-syntax-ns#type`. [relation]s other than the type predicate **must** appear in `predicates.csv` with arity 2. If rdf:type is used as [relation], then the corresponding [object] **must** also appear in `predicates.csv` with arity 1. Please note that it is not necessary to provide a list of entity names, as this system supports the so-called "inductive setting" where testing and validation files can mention entity names not seen during training.
+An experiment is described by a YAML file, e.g. `configs/AD1_maxmax.yaml`. Every key is required:
 
-## How to Run the Experiments
-
-First edit `./src/config/config.yaml` to select your preferred configuration. This file has several options:
-
-- data_dir: the path of the folder that the benchmark/dataset for this experiment (usually this is a subfolder of ./data)
-- exp_dir: the path of the folder where the folder with experiment results for this benchmar will be stored. We recommend using `./experiments`.
-- use_dummy_constants: parameter set to `true` or `false` to introduce dummy constants in the training graph to disincentivise false positives. 
-- encoding_scheme: currently only `canonical` or `iclr22` are supported, corresponding to the canonical encoding or the encoding described in our ICLR22 paper [1]
-- aggregation_1: aggregation function in the first layer; currently supporting `max` or `sum` only
-- aggregation_2: aggregation function in the second layer; currently supporting `max` or `sum` only
-- derivation_threshold: threshold \theta from the papers, applied after the last layer to decide which facts are derived
-- non_negative_weights: parameter set to `true` or `false` to impose that the learned matrices of the model have non-negative weights. 
-- clamping: [FEATURE CURRENTLY UNSUPPORTED] 
-
-To train and apply a GNN model for a given benchmark with the structure described in the previous section, please open a terminal in the root directory and run 
-
-```bash
-  python run_experiment.py ./src/config/config.yaml
+```yaml
+data_dir: ./data/node_classification/AD1  # the dataset folder
+exp_dir: ./experiments                    # where the experiment's output folder is created
+use_dummies: false                        # (iclr22 only) add dummy constants to the training graph to discourage false positives
+encoding_scheme: canonical                # canonical | iclr22
+agg_function_1: max                       # aggregation in layer 1: max | sum
+agg_function_2: max                       # aggregation in layer 2: max | sum
+derivation_threshold: 0.000000001         # threshold (theta in the papers), between 0 and 1, above which a fact is derived
+non_negative_weights: true                # clamp the weight matrices to be non-negative after each training step (monotonicity)
+clamping: 0                               # [CURRENTLY UNSUPPORTED] must be non-negative
 ```
 
-This will create a new folder in `./experiments` labelled by the dataset name (the name of the folder whose path is data_dir) followed by the timestamp of the experiment start. The experiment should create the following files:
+`encoding_scheme: canonical` uses the canonical encoding directly. `iclr22` uses the encoding from our ICLR 2022
+paper [1], which also supports binary target predicates.
 
-You can run the experiment with the option --load_model [folder of a previous experiment]. This will load the model and encoder from a previous experiment. This can be useful to skip training; however, please be mindful that the model parameters in that experiment match those in your current folder. Further support to validate this condition should eventually be added.
+## Running an experiment
+
+```bash
+python -m src.run.run_experiment configs/AD1_maxmax.yaml
+```
+
+This trains a model, evaluates it on the validation and test data, extracts a program from it, and explains its
+top-scoring test predictions. `run_all.sh` does this for every file in `configs/`. Options:
+
+- `--load-model [experiment folder]` skips training and loads the model and encoders from a previous experiment. The
+  loaded model's parameters are not checked against the current configuration, so make sure they match.
+- `--skip-program` skips the (slow) program extraction.
+
+Each run creates a folder in `exp_dir` named after the dataset folder and the start time, containing:
 
 ```
 experiment_name
-├── checkpoints
-├── config.yaml
+├── checkpoints                  # model snapshots saved during training
+├── [config file].yaml           # a copy of the configuration used
 ├── external_encoder.tsv
 ├── internal_encoder.tsv
 ├── model.pt
-├── predicted_triples_scored.tsv
-├── predicted_triples.tsv
+├── valid_metrics.txt
 ├── test_metrics.txt
-└── valid_metrics.txt 
+├── predicted_triples.tsv
+├── predicted_triples_scored.tsv
+├── program.txt
+└── explanations.txt
 ```
 
-- Folder `checkpoints` contains checkpoint saves of the model during training.
-- File `config.yaml` is a copy of the configuration file used to run this experiment. 
-- Files `external_encoder.tsv` and `internal_encoder.tsv` show the external and internal encoder, respectively, used for the experiment. Please note that we use the framework from our paper [2] where we always consider an external, non-canonical encoder that maps an input dataset to a (col,d)-dataset, and then an internal encoder--which is always the canonical encoder--which maps this (col,d)-dataset to a (col,d)-graph. The ICLR22 is an example of external encoder. If we wish to use only the canonical encoder in an experiment (i.e. by selecting "canonical" in the configuration file), then our code generates an external encoder which is simply the identity.
-- File `model.pt` is a saved version of the model. 
-- File `predicted_triples_scored.tsv` contains a prediction in each line followed by its "score" (i.e. the corresponding value in the last layer of the GNN application)
-- File `predicted_triples.tsv` contains the same but without the scores.
-- Files `test_metrics.txt` and `valid_metrics.txt` contain the classification metrics obtained by applying the model on the testing and validation datasets, respectively, over a variety of fixed thresholds.
+- `external_encoder.tsv` and `internal_encoder.tsv` are the two encoders (see "Encodings" below).
+  `checkpoints`, `model.pt` and the encoder files are only written when the model is trained, not when it is loaded.
+- `valid_metrics.txt` and `test_metrics.txt` give precision, recall, accuracy and F1 at a range of thresholds, plus
+  the area under the precision-recall curve.
+- `predicted_triples.tsv` lists the facts the model derives on the test graph, from highest to lowest score.
+  `predicted_triples_scored.tsv` is the same with each fact's score (its value in the model's last layer).
+- `program.txt` is the extracted program (see "Rule extraction" below).
+- `explanations.txt` lists the highest-scoring test predictions (`N_FACTS_TO_EXPLAIN` in `run_experiment.py`),
+  each followed by a rule that explains it.
+
+### Rule syntax
+
+Rules are written as `head :- body .`, with atoms `<predicate>[?X]` (unary) or `<predicate>[?X,?Y]` (binary):
+
+```
+<A>[?X0] :- <S>[?X1,?X0], <A>[?X1], <R>[?X2,?X0] .
+```
+
+`src/datalog/apply_rules.py` can parse such rules and apply them to a set of facts.
+
+### Extracting rules from a saved model
+
+To run only the program extraction on a model from a previous experiment:
+
+```bash
+python -m src.run.extract_rules [experiment folder] [threshold] [output folder] [canonical|iclr22] [--predicate P]
+```
+
+`--predicate` restricts extraction to rules whose head is `P`.
+
+### The ADNI pipeline
+
+`src/adni/` is a separate extraction method for the ADNI brain-graph datasets (`data/node_classification/AD1`,
+`AD2`), which uses the fact that their graphs have a fixed shape. The signature must include the unary predicates
+`node`, `node_0` ... `node_{d-1}` and `positive`, and the binary predicates `part_of` and `1.0` ... `{max}.0`. A
+candidate rule body is a d x d upper-triangular matrix whose cell (i, j) holds the colour of the edge between
+regions i and j (or 0 for no edge). To search for a sound rule for `positive`:
+
+```bash
+python -m src.run.extract_adni_rules [experiment folder] [threshold] [output folder]
+```
+
+This writes the rule to `[output folder]/program.txt`.
+
+## Code map
+
+The model:
+
+- `src/model/cd_graph.py`: `CDGraph`, a (col,d)-graph: node features plus coloured edges.
+- `src/model/gnn_architectures.py`: `GNN`, the two-layer model, with accessors for its matrices (`matrix_A`,
+  `matrix_B`), biases, activations and aggregations.
+- `src/model/gnn_transformation.py`: applies the full transformation described in the papers: external encoding,
+  internal encoding, model, and the two decodings.
+
+Encodings. We use the framework from our paper [2]: an external (non-canonical) encoder maps a dataset to a
+(col,d)-dataset, and an internal encoder, which is always the canonical one, maps that to a (col,d)-graph. With
+`encoding_scheme: canonical` the external encoder is the identity.
+
+- `src/encodings/canonical.py`: `CanonicalEncoderDecoder`, the internal encoder.
+- `src/encodings/noncanonical/`: the external encoders (`IdentityEncoderDecoder`, `ICLREncoderDecoder`). Besides
+  encoding and decoding facts, they "unfold" rules over the canonical signature back into rules over the data
+  signature.
+
+Rule extraction (`src/rule_extraction/`):
+
+- `tree_shaped_conjunction.py`: `TreeShapedConjunction`, the tree-shaped rule bodies that extraction works with,
+  and `CompactSubTree`, a compact representation of one of their subtrees.
+- `full_program.py`: `EquivalentProgramExtractor`. For each head predicate it builds the largest relevant rule
+  body (`compute_tree_for`), then searches its subtrees for the minimal sound ones.
+- `lattice_search.py`: the generic search over subtrees used by the above, with pluggable exploration orders
+  (`Frontier`s) and stopping rules (`ResultPolicy`s).
+- `typed_constraint.py`: `TypedConstraint`, structural knowledge about an encoding (e.g. which edges can exist
+  between which kinds of node), used to prune the search.
+- `fact_explanation.py`: `FactExplainer`, which explains one prediction: it builds a rule body grounded in the
+  input graph, then shrinks it with Optimisations 1–3 (`rule_optimisation_*.py`).
+
+Everything else: `src/config/` (reads the YAML configuration), `src/run/` (the scripts above, training and metrics),
+`src/datalog/` (parsing, writing and applying rules), `src/utils/` (`BitSet` and small helpers).
+
+## Tests
+
+```bash
+python -m pytest
+```
+
+## References
+
+[1] David Tena Cucala, Bernardo Cuenca Grau, Egor V. Kostylev, Boris Motik. Explainable GNN-Based Models over
+Multi-Relational Graphs. ICLR 2022.
+
+[2] TODO

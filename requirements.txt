@@ -1,0 +1,7 @@
+torch
+torch_geometric
+bidict
+numpy
+pyyaml
+rdflib
+pytest
