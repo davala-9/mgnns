@@ -155,3 +155,18 @@ def test_is_sound_respects_included_nodes():
     device = torch.device("cpu")
     assert is_sound(matrix, encoder, model, device, position=3, threshold=0.5, included_nodes={0})
     assert not is_sound(matrix, encoder, model, device, position=3, threshold=0.5, included_nodes={1})
+
+
+@pytest.mark.parametrize("score, expected", [(0.25, False), (0.5, False), (0.75, True)])
+def test_is_sound_requires_a_score_strictly_above_the_threshold(monkeypatch, score, expected):
+    from src.adni import matrix_to_tree as matrix_to_tree_module
+    encoder = make_encoder_with_positive()
+
+    def fake_apply_model(input_graph, device, model):
+        output = input_graph.clone()
+        output.features = torch.full_like(output.features, score)
+        return output
+    monkeypatch.setattr(matrix_to_tree_module, "apply_model", fake_apply_model)
+
+    matrix = SparseTriangularMatrix.empty(2, 1)
+    assert is_sound(matrix, encoder, None, torch.device("cpu"), position=3, threshold=0.5) == expected

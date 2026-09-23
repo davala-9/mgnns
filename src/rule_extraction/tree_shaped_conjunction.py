@@ -339,4 +339,4 @@ class CompactSubTree:
             input_graph.features[var_id] = (
                 torch.tensor(base_tree.features[var_id].from_compressed(self.masks[j]).as_vector()))
         output_graph = apply_model(input_graph,device,model)
-        return output_graph.features[0][pred_position] >= threshold
+        return output_graph.features[0][pred_position] > threshold

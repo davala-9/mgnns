@@ -83,9 +83,9 @@ def matrix_to_tree(matrix: SparseTriangularMatrix, internal_encoder, included_no
 
 
 # Whether the model, applied to matrix_to_tree(matrix, internal_encoder, included_nodes), derives the unary
-# predicate at `position` for the root with a score of at least `threshold`.
+# predicate at `position` for the root with a score above `threshold`.
 def is_sound(matrix: SparseTriangularMatrix, internal_encoder, model, device, position: int, threshold: float,
              included_nodes=None) -> bool:
     tree = matrix_to_tree(matrix, internal_encoder, included_nodes=included_nodes)
     output_graph = apply_model(tree.as_cd_graph, device, model)
-    return output_graph.features[0][position].item() >= threshold
+    return output_graph.features[0][position].item() > threshold

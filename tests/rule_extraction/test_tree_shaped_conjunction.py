@@ -494,3 +494,19 @@ def test_check_soundness_runs_and_returns_a_boolean_tensor():
     result = tree.initial_compact.check_soundness(tree, device, model, threshold=0.5, pred_position=0)
     assert result.dtype == torch.bool
     assert result.dim() == 0
+
+
+@pytest.mark.parametrize("score, expected", [(0.25, False), (0.5, False), (0.75, True)])
+def test_check_soundness_requires_a_score_strictly_above_the_threshold(monkeypatch, score, expected):
+    # Same convention as decoding: a fact is derived only if its score is strictly above the threshold.
+    from src.rule_extraction import tree_shaped_conjunction as tsc_module
+    tree, _ = build_multi_node_tree()
+
+    def fake_apply_model(input_graph, device, model):
+        output = input_graph.clone()
+        output.features = torch.full_like(output.features, score)
+        return output
+    monkeypatch.setattr(tsc_module, "apply_model", fake_apply_model)
+
+    result = tree.initial_compact.check_soundness(tree, torch.device("cpu"), None, threshold=0.5, pred_position=0)
+    assert bool(result) == expected
