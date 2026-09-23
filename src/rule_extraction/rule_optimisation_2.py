@@ -4,9 +4,8 @@ from typing import TYPE_CHECKING
 import torch
 
 from src.rule_extraction.tree_shaped_conjunction import TreeShapedConjunction
-from src.model.gnn_transformation import apply_model
+from src.rule_extraction.greedy_atom_selection import add_atoms_until_sound
 from src.utils.bitset import BitSet
-from src.utils.utils import find_index_and_insert
 
 if TYPE_CHECKING:  # avoid a circular import: fact_explanation.py imports this module back
     from src.rule_extraction.fact_explanation import FactExplainer
@@ -129,22 +128,9 @@ def apply_optimisation(fe: FactExplainer, rule_body: TreeShapedConjunction, pred
 
     contributions = compute_path_weights(fe.model, rule_body, var_layer_mask, predicate_position)
 
-    # Sort candidate atoms by increasing analytic weight; pop() from the end to try the most
-    # strongly-weighted atoms first.
-    contributors_list = sorted((weight, var_id, pos) for (var_id, pos), weight in contributions.items())
-
-    selected_nodes = [0]
-    empty_bitset = BitSet.from_subset(fe.model.layer_dimension(0), {})
-    selected_features = [empty_bitset]
-
-    while contributors_list:
-        weight, var_id, pos = contributors_list.pop()
-        idx, is_new = find_index_and_insert(sorted_list=selected_nodes, element=var_id)
-        if is_new:
-            selected_features = (selected_features[:idx] + [empty_bitset] + selected_features[idx:])
-        selected_features[idx] = selected_features[idx].add_element(pos)
-        optimised_rule = rule_body.from_subtree(selected_nodes, selected_features)
-        output_graph = apply_model(optimised_rule.as_cd_graph, fe.device, fe.model)
-        if output_graph.features[0][predicate_position] > fe.threshold:
-            return optimised_rule
-    raise AssertionError("This part of the code should not be reachable. There's a bug in Optimisation 2")
+    # Try the most strongly-weighted atoms first (ties broken by (var_id, pos), largest first).
+    contributors = sorted(((weight, var_id, pos) for (var_id, pos), weight in contributions.items()), reverse=True)
+    optimised_rule = add_atoms_until_sound(rule_body, [(var_id, pos) for _, var_id, pos in contributors],
+                                           fe.device, fe.model, fe.threshold, predicate_position)
+    assert optimised_rule is not None, "This part of the code should not be reachable. There's a bug in Optimisation 2"
+    return optimised_rule

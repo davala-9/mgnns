@@ -5,7 +5,7 @@ from src.rule_extraction.tree_shaped_conjunction import TreeShapedConjunction
 from src.utils.bitset import BitSet
 from src.model.cd_graph import TraceCollector
 from src.model.gnn_transformation import apply_model
-from src.utils.utils import find_index_and_insert
+from src.rule_extraction.greedy_atom_selection import add_atoms_until_sound
 
 if TYPE_CHECKING:  # avoid a circular import: fact_explanation.py imports this module back
     from src.rule_extraction.fact_explanation import FactExplainer
@@ -43,6 +43,7 @@ def apply_optimisation(fe: FactExplainer, rule_body: TreeShapedConjunction, pred
             apply_model(temp_cd_graph, fe.device, fe.model,trace)
 
             # Compute the influence value for this contributor, iterating over the computation tree
+            contributors_to_influence_dict[(var_id, pos)] = (0, 0)  # unless a non-zero contribution is found below
             contribution_score = 0
             current_variable_id = 0  # start from root variable
             next_var_id = next(iter(temp_tree.children[current_variable_id].values()), None) # Just get only child
@@ -57,33 +58,11 @@ def apply_optimisation(fe: FactExplainer, rule_body: TreeShapedConjunction, pred
                 if contribution_score > 0:
                     contributors_to_influence_dict[(var_id, pos)] = (l, contribution_score)
                     break
-                contributors_to_influence_dict[(var_id, pos)] = (0, 0)
 
-    # Next we sort contributors by contribution.
-    contributors_list = []
-    for (y, j), (s,l) in contributors_to_influence_dict.items():
-        contributors_list.append((s, l, y, j))
-    contributors_list = sorted(contributors_list)
-
-    # Start trying rules from the empty rule, adding atoms in increasing order of contribution
-    # We represent in two lists the nodes that we are including and their features that we are including in the optim
-    selected_nodes = [0]
-    empty_bitset = BitSet.from_subset(fe.model.layer_dimension(0),{}) # Remember this is immutable
-    selected_features = [empty_bitset]
-
-    while contributors_list:
-        # Add the node and feature to the lists selected by the optimisation
-        influence_score, layer, var_id, pos = contributors_list.pop()
-        idx, is_new = find_index_and_insert(sorted_list=selected_nodes, element=var_id)
-        if is_new:
-            selected_features = (selected_features[:idx] + [empty_bitset] + selected_features[idx:])
-        selected_features[idx] = selected_features[idx].add_element(pos)
-        # Test the new version of the rule
-        optimised_rule = rule_body.from_subtree(selected_nodes,selected_features)
-        temp_cd_graph = optimised_rule.as_cd_graph
-        output_graph = apply_model(temp_cd_graph, fe.device, fe.model)
-        if output_graph.features[0][predicate_position] > fe.threshold:
-            return optimised_rule
-    raise AssertionError("This part of the code should not be reachable. There's a bug in Optimisation 1")
-
-    # TODO ITP: maybe a clean-up step like in approximation 2 can help make improvements
+    # Try atoms from the most to the least influential: first by the layer where their contribution shows up
+    # (closest to the head first), then by the size of that contribution (ties broken by (var_id, pos), largest first).
+    contributors = sorted(contributors_to_influence_dict.items(), key=lambda item: (item[1], item[0]), reverse=True)
+    optimised_rule = add_atoms_until_sound(rule_body, [atom for atom, _ in contributors],
+                                           fe.device, fe.model, fe.threshold, predicate_position)
+    assert optimised_rule is not None, "This part of the code should not be reachable. There's a bug in Optimisation 1"
+    return optimised_rule
