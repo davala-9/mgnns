@@ -21,3 +21,7 @@ dist/
 .vscode/
 .idea/
 *.swp
+
+# Experiment outputs and old code kept locally
+experiments/
+src/old/
