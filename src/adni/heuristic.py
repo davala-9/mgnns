@@ -5,11 +5,9 @@ POSITIVE_PREDICATE = "positive"
 
 
 # A cheap, model-only estimate of how much a matrix cell (i, j) = value contributes to the "positive"
-# prediction, without ever running the model: at each hidden position p that actually helps "positive"
-# (positive part_of weight at layer 2, matching backpropagate_relevance's own >0 relevance convention --
-# see src/utils/utils.py), sum node_j's own-feature contribution to p via the layer-1 colour-`value`
-# message (matrix_B) and node_i's own-feature contribution to p via its layer-1 self-update (matrix_A),
-# then weight each p by its part_of weight into "positive" and sum.
+# prediction: at each hidden position p that actually helps "positive", sum node_j's own-feature contribution
+# to p via the layer-1 colour-`value` (matrices B) and node_i's own-feature contribution to p via its layer-1
+# self-update (matrix_A), then weight each p by its part_of weight into "positive" and sum.
 def heuristic_for_element(i: int, j: int, value: int, internal_encoder, model) -> float:
     node_pos = internal_encoder.unary_pred_position_dict[NODE_PREDICATE]
     nodei_pos = internal_encoder.unary_pred_position_dict[node_predicate_for(i)]

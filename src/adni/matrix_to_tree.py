@@ -15,7 +15,7 @@ def colour_predicate_for(value: int) -> str:
     return f"{value}.0"
 
 
-# Recovers (d, max_value) from an internal_encoder that already declares an ADNI signature: d is how
+# Recovers (d, max_value) from an internal_encoder that declares an ADNI signature: d is how
 # many node_k unary predicates it has (0, 1, 2, ... until one is missing), max_value is how many
 # colour_predicate_for(v) binary predicates it has (1, 2, ... until one is missing).
 def infer_dimensions(internal_encoder) -> tuple[int, int]:
@@ -27,19 +27,7 @@ def infer_dimensions(internal_encoder) -> tuple[int, int]:
         max_value += 1
     return d, max_value
 
-
-# A TreeShapedConjunction is a tree: children[parent][edge] = child produces the real-world fact
-# (child, colour_predicate, parent) -- messages flow child -> parent, matching how compute_tree_for
-# treats "child" as relevance flowing backward from what a node receives (see as_cd_graph and
-# CanonicalEncoderDecoder.encode_dataset, whose (subject, colour, object) edges land the same way).
-#
-# included_nodes restricts which of the matrix's 0..d-1 nodes actually become part_of children of the
-# root (default: all of them). Meant for dropping nodes that turned out to have no incident matrix
-# entry at all once a search has minimised the matrix down: such a node contributes nothing but its own
-# (unconditional) part_of self-loop, so leaving it out entirely can shrink the tree further than
-# minimising the matrix's cells alone ever could. Any matrix entry touching an excluded node is skipped;
-# in the intended (isolated-node) use this never actually happens, since an included node's own matrix
-# entries are exactly what would have kept it out of `included_nodes` in the first place.
+"""See the explanation at SparseTriangularMatrix to understand what each such matrix represents and why"""
 def matrix_to_tree(matrix: SparseTriangularMatrix, internal_encoder, included_nodes=None) -> TreeShapedConjunction:
     if included_nodes is None:
         included_nodes = range(matrix.d)

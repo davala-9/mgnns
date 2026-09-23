@@ -8,6 +8,10 @@ from src.rule_extraction.fact_explanation import FactContext
 from src.utils.bitset import BitSet
 from src.utils.utils import backpropagate_relevance
 
+"""This module is responsible for implementing an adni-specific version of the fact explanation.
+It works analogously to fact_explanation, except that instead of building a TreeShapedConjunction, 
+it builds a SparseTriangularMatrix. See more information in SparseTriangularMatrix"""
+
 
 # Finds the position of the feature corresponding to the d brain regions that is 1.
 # It returns the first 1, but there should only be one 1.
