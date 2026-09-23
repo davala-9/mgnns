@@ -11,6 +11,18 @@ class GroundContext:
     graph: CDGraph # Graph on which the fact was predicted
     canonical_variable_to_constant_index: dict[int,int] # map of pre-unfold variables to constants in the cd-graph
 
+# Hands out fresh variable names X0, X1, X2, ... for the data-signature rule produced by an unfolding.
+class VariableNamer:
+    PREFIX = "X"
+
+    def __init__(self):
+        self._counter = 0
+
+    def new_variable(self) -> str:
+        name = self.PREFIX + str(self._counter)
+        self._counter += 1
+        return name
+
 class NonCanonicalEncoder(ABC):
 
     canonical_unary_predicates: list

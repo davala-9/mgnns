@@ -1,7 +1,7 @@
 import torch
 
 from src.encodings.canonical import CanonicalEncoderDecoder
-from src.encodings.noncanonical.noncanonical import NonCanonicalEncoder, GroundContext
+from src.encodings.noncanonical.noncanonical import NonCanonicalEncoder, GroundContext, VariableNamer
 from bidict import bidict
 
 from src.rule_extraction.tree_shaped_conjunction import TreeShapedConjunction
@@ -206,19 +206,10 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
         # This has multiple uses in the unfolding
         head_is_binary = self.data_pred_to_arity[head_predicate] == 2
 
-        # Variable manager
-        data_var_prefix = "X"  # Variables in the unfolded conjunction are of the form Xn, for n a number
-        data_var_counter = 0
-        def new_variable():  # Aux method to create new variables
-            nonlocal data_var_counter
-            data_var_counter += 1
-            return data_var_prefix + str(data_var_counter)
-
-        # Define root variables
-        root_variables = [data_var_prefix + str(data_var_counter)]  # X0 is always a root variable
+        new_variable = VariableNamer().new_variable
+        root_variables = [new_variable()]  # X0 is always a root variable
         if head_is_binary:
-            second_root_data_var = new_variable()
-            root_variables.append(second_root_data_var)
+            root_variables.append(new_variable())
 
         # Aux method, takes two variables and returns all possible binary atoms that use them both
         def all_binary_atoms(data_var_1, data_var_2):
@@ -350,20 +341,11 @@ class ICLREncoderDecoder(NonCanonicalEncoder):
             else:
                 return [canonical_constant]
 
-        # Variable manager
-        data_var_prefix = "X" # Variables in the unfolded conjunction are of the form Xn, for n a number
-        data_var_counter = 0
-        def new_variable(): # Aux method to create new variables
-            nonlocal data_var_counter
-            data_var_counter += 1
-            return data_var_prefix + str(data_var_counter)
-        root_variables = [data_var_prefix + str(data_var_counter)] # X0 is always a root variable
-
+        new_variable = VariableNamer().new_variable
+        root_variables = [new_variable()]  # X0 is always a root variable
         data_var_to_data_const[root_variables[0]] = get_data_constants_for_can_variable(0)[0]
-
         if head_is_binary:
-            second_root_data_var = new_variable()
-            root_variables.append(second_root_data_var)
+            root_variables.append(new_variable())
             data_var_to_data_const[root_variables[1]] = get_data_constants_for_can_variable(0)[1]
 
         # Unfold unary canonical atom that unifies with a canonical constant for a pair of data_constants.

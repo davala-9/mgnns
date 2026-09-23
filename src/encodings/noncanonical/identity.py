@@ -1,5 +1,5 @@
 from src.encodings.canonical import CanonicalEncoderDecoder
-from src.encodings.noncanonical.noncanonical import NonCanonicalEncoder, GroundContext
+from src.encodings.noncanonical.noncanonical import NonCanonicalEncoder, GroundContext, VariableNamer
 from src.rule_extraction.tree_shaped_conjunction import TreeShapedConjunction
 from src.utils.utils import TYPE_PRED
 
@@ -60,16 +60,8 @@ class IdentityEncoderDecoder(NonCanonicalEncoder):
 
         data_conj = []  # Not necessarily tree-shaped
 
-        # Data variable list
-        data_var_prefix = "X"
-        data_var_counter = 0
-        root_variable = data_var_prefix + str(data_var_counter)
-
-        def new_variable():
-            nonlocal data_var_counter
-            data_var_counter += 1
-            return data_var_prefix + str(data_var_counter)
-
+        new_variable = VariableNamer().new_variable
+        root_variable = new_variable()
         var_id_to_datavar = {0: root_variable}
         for var_id in range(len(can_conj)):
             for feat in can_conj.features[var_id].elements():
