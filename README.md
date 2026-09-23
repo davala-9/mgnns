@@ -67,13 +67,13 @@ were used to build some of the datasets in `data/` from other formats.
 
 ## Configuration
 
-An experiment is described by a YAML file, e.g. `configs/AD1_maxmax.yaml`. Every key is required:
+An experiment is described by a YAML file, e.g. `configs/WN18RRv1_maxmax.yaml`. Every key is required:
 
 ```yaml
-data_dir: ./data/node_classification/AD1  # the dataset folder
+data_dir: ./data/link_prediction/WN18RRv1 # the dataset folder
 exp_dir: ./experiments                    # where the experiment's output folder is created
 use_dummies: false                        # (iclr22 only) add dummy constants to the training graph to discourage false positives
-encoding_scheme: canonical                # canonical | iclr22
+encoding_scheme: iclr22                   # canonical | iclr22
 agg_function_1: max                       # aggregation in layer 1: max | sum
 agg_function_2: max                       # aggregation in layer 2: max | sum
 derivation_threshold: 0.000000001         # threshold (theta in the papers), between 0 and 1, above which a fact is derived
@@ -87,11 +87,12 @@ paper [1], which also supports binary target predicates.
 ## Running an experiment
 
 ```bash
-python -m src.run.run_experiment configs/AD1_maxmax.yaml
+python -m src.run.run_experiment configs/WN18RRv1_maxmax.yaml
 ```
 
 This trains a model, evaluates it on the validation and test data, extracts a program from it, and explains its
-top-scoring test predictions. `run_all.sh` does this for every file in `configs/`. Options:
+top-scoring test predictions. `run_all.sh` does this for every file in `configs/` (the ADNI configs will fail
+unless you have the ADNI data; see below). Options:
 
 - `--load-model [experiment folder]` skips training and loads the model and encoders from a previous experiment. The
   loaded model's parameters are not checked against the current configuration, so make sure they match.
@@ -146,8 +147,10 @@ python -m src.run.extract_rules [experiment folder] [threshold] [output folder] 
 
 ### The ADNI pipeline
 
-`src/adni/` is a separate extraction method for the ADNI brain-graph datasets (`data/node_classification/AD1`,
-`AD2`), which uses the fact that their graphs have a fixed shape. The signature must include the unary predicates
+`src/adni/` is a separate extraction method for the ADNI brain-graph datasets, which uses the fact that their graphs
+have a fixed shape. **The ADNI data is not included in this repository, and must never be committed to it: its
+conditions of use do not allow redistribution.** If you have access to it, place it in `data/node_classification/AD1`
+and `AD2` (both are in `.gitignore`), to match `configs/AD1_maxmax.yaml` and `configs/AD2_maxmax.yaml`. The signature must include the unary predicates
 `node`, `node_0` ... `node_{d-1}` and `positive`, and the binary predicates `part_of` and `1.0` ... `{max}.0`. A
 candidate rule body is a d x d upper-triangular matrix whose cell (i, j) holds the colour of the edge between
 regions i and j (or 0 for no edge). To search for a sound rule for `positive`:

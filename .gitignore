@@ -25,3 +25,7 @@ dist/
 # Experiment outputs and old code kept locally
 experiments/
 src/old/
+
+# ADNI data: its conditions of use forbid redistribution, so it must never be committed
+data/node_classification/AD1/
+data/node_classification/AD2/
