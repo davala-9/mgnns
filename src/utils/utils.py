@@ -32,12 +32,14 @@ def load_predicates(predicates_file):
     try:
         with open(predicates_file, 'r') as f:
             for line in f:
+                if not line.strip():
+                    continue
                 # Every line is of form "predicate,arity"
-                pair = line.split(',')
-                if int(pair[1][:-1]) == 1:  # [:-1] to get rid of \n
-                    unary_predicates.append(pair[0])
+                predicate, arity = line.strip().rsplit(',', 1)
+                if int(arity) == 1:
+                    unary_predicates.append(predicate)
                 else:
-                    binary_predicates.append(pair[0])
+                    binary_predicates.append(predicate)
 
         # TODO: sanity check - no duplicates
         return binary_predicates, unary_predicates
