@@ -1,8 +1,11 @@
 import pytest
+import torch
 
-from src.adni.matrix_to_tree import infer_dimensions, matrix_to_tree, node_predicate_for, colour_predicate_for
+from src.adni.matrix_to_tree import infer_dimensions, is_sound, matrix_to_tree, node_predicate_for, \
+    colour_predicate_for
 from src.adni.sparse_triangular_matrix import SparseTriangularMatrix
 from src.encodings.canonical import CanonicalEncoderDecoder
+from src.model.gnn_architectures import GNN
 
 
 def make_internal_encoder(d, max_value):
@@ -116,3 +119,39 @@ def test_included_nodes_drops_matrix_entries_touching_an_excluded_node():
     tree = matrix_to_tree(matrix, encoder, included_nodes={0, 2})  # excludes node_1, the entry's target
     node_0_id = 1
     assert tree.children[node_0_id] == {}
+
+
+# --- is_sound ---
+
+# d=2, max_value=1, plus "positive" at unary position 3. The model derives "positive" at the root iff the root
+# has a part_of child with node_0: hidden[0] = node_0 feature, positive = sigmoid(20 * max part_of hidden[0] - 10).
+def make_node_0_detector(encoder):
+    model = GNN(feature_dimension=4, num_edge_colours=2, aggregation_1="max", aggregation_2="max")
+    with torch.no_grad():
+        for param in model.parameters():
+            param.zero_()
+        model.lin_self_1.weight[0, encoder.unary_pred_position_dict[node_predicate_for(0)]] = 1.0
+        model.conv2.weights[encoder.binary_pred_colour_dict["part_of"], 3, 0] = 20.0
+    return model
+
+
+def make_encoder_with_positive():
+    unary = ["node", node_predicate_for(0), node_predicate_for(1), "positive"]
+    binary = ["part_of", colour_predicate_for(1)]
+    return CanonicalEncoderDecoder(unary_predicates=unary, binary_predicates=binary)
+
+
+def test_is_sound_includes_every_node_by_default():
+    encoder = make_encoder_with_positive()
+    model = make_node_0_detector(encoder)
+    matrix = SparseTriangularMatrix.empty(2, 1)
+    assert is_sound(matrix, encoder, model, torch.device("cpu"), position=3, threshold=0.5)
+
+
+def test_is_sound_respects_included_nodes():
+    encoder = make_encoder_with_positive()
+    model = make_node_0_detector(encoder)
+    matrix = SparseTriangularMatrix.empty(2, 1)
+    device = torch.device("cpu")
+    assert is_sound(matrix, encoder, model, device, position=3, threshold=0.5, included_nodes={0})
+    assert not is_sound(matrix, encoder, model, device, position=3, threshold=0.5, included_nodes={1})

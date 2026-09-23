@@ -1,10 +1,9 @@
 import numpy as np
 
 from src.adni.matrix_search import minimise, prune_isolated_nodes
-from src.adni.matrix_to_tree import PART_OF_PREDICATE, colour_predicate_for, infer_dimensions, matrix_to_tree, \
+from src.adni.matrix_to_tree import PART_OF_PREDICATE, colour_predicate_for, infer_dimensions, is_sound, \
     node_predicate_for
 from src.adni.sparse_triangular_matrix import SparseTriangularMatrix
-from src.model.gnn_transformation import apply_model
 from src.rule_extraction.fact_explanation import FactContext
 from src.utils.bitset import BitSet
 from src.utils.utils import backpropagate_relevance
@@ -132,12 +131,10 @@ def derive_minimal_matrix_from_fact(fact: tuple[str, str, str], trace, external_
     position = fact_context.cd_fact_pred_pos
 
     def check_soundness_with_nodes(candidate: SparseTriangularMatrix, included_nodes) -> bool:
-        tree = matrix_to_tree(candidate, internal_encoder, included_nodes=included_nodes)
-        output_graph = apply_model(tree.as_cd_graph, device, model)
-        return output_graph.features[0][position].item() >= threshold
+        return is_sound(candidate, internal_encoder, model, device, position, threshold, included_nodes)
 
     def check_soundness(candidate: SparseTriangularMatrix) -> bool:
-        return check_soundness_with_nodes(candidate, range(candidate.d))
+        return is_sound(candidate, internal_encoder, model, device, position, threshold)
 
     matrix = minimise(matrix, internal_encoder, model, check_soundness)
     included_nodes = prune_isolated_nodes(matrix, check_soundness_with_nodes)

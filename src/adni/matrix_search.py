@@ -21,6 +21,13 @@ def value_order_table(d: int, max_value: int, internal_encoder, model) -> list:
     return table
 
 
+# The candidate values for cell (i, j), in value_order, that have a strictly bigger heuristic than its current
+# value (all of them if the cell is still 0).
+def _better_candidates(value_order: list, i: int, j: int, current: int) -> list:
+    candidates = value_order[i][j]
+    return candidates if current == 0 else candidates[:candidates.index(current)]
+
+
 # Every successor of `matrix` under `value_order` (see value_order_table): for a cell without a value
 # yet, one successor per candidate value (adding it, biggest-heuristic first); for a cell that already
 # has a value, one successor per candidate value with a strictly bigger heuristic than its current one
@@ -29,10 +36,7 @@ def get_successors(matrix: SparseTriangularMatrix, value_order: list):
     entries = matrix.to_dict()
     for i in range(matrix.d):
         for j in range(i, matrix.d):
-            candidates = value_order[i][j]
-            current = entries.get((i, j), 0)
-            better_candidates = candidates if current == 0 else candidates[:candidates.index(current)]
-            for value in better_candidates:
+            for value in _better_candidates(value_order, i, j, entries.get((i, j), 0)):
                 yield matrix.with_value(i, j, value)
 
 
@@ -52,9 +56,7 @@ def greedy_climb(matrix: SparseTriangularMatrix, value_order: list, internal_enc
         cells_with_a_move = 0
         for i in range(matrix.d):
             for j in range(i, matrix.d):
-                candidates = value_order[i][j]
-                current = entries.get((i, j), 0)
-                remaining = candidates if current == 0 else candidates[:candidates.index(current)]
+                remaining = _better_candidates(value_order, i, j, entries.get((i, j), 0))
                 if not remaining:
                     continue
                 cells_with_a_move += 1

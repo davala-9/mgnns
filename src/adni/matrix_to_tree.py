@@ -1,4 +1,5 @@
 from src.adni.sparse_triangular_matrix import SparseTriangularMatrix
+from src.model.gnn_transformation import apply_model
 from src.rule_extraction.tree_shaped_conjunction import TreeShapedConjunction, TreeShapedConjunctionBuilder
 from src.utils.bitset import BitSet
 
@@ -79,3 +80,12 @@ def matrix_to_tree(matrix: SparseTriangularMatrix, internal_encoder, included_no
         builder.children[node_var_ids[i]][(0, colour, j)] = node_var_ids[j]
 
     return builder.build()
+
+
+# Whether the model, applied to matrix_to_tree(matrix, internal_encoder, included_nodes), derives the unary
+# predicate at `position` for the root with a score of at least `threshold`.
+def is_sound(matrix: SparseTriangularMatrix, internal_encoder, model, device, position: int, threshold: float,
+             included_nodes=None) -> bool:
+    tree = matrix_to_tree(matrix, internal_encoder, included_nodes=included_nodes)
+    output_graph = apply_model(tree.as_cd_graph, device, model)
+    return output_graph.features[0][position].item() >= threshold

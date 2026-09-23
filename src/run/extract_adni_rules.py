@@ -7,11 +7,10 @@ import torch
 
 from src.adni.heuristic import POSITIVE_PREDICATE
 from src.adni.matrix_search import greedy_climb, minimise, prune_isolated_nodes, value_order_table
-from src.adni.matrix_to_tree import infer_dimensions, matrix_to_tree
+from src.adni.matrix_to_tree import infer_dimensions, is_sound, matrix_to_tree
 from src.adni.rule_printing import tree_to_rule
 from src.adni.sparse_triangular_matrix import SparseTriangularMatrix
 from src.encodings.canonical import CanonicalEncoderDecoder
-from src.model.gnn_transformation import apply_model
 from src.run.run_experiment import load_model
 from src.utils.utils import check
 
@@ -30,12 +29,10 @@ if __name__ == "__main__":
     d, max_value = infer_dimensions(internal_encoder)
 
     def check_soundness_with_nodes(matrix: SparseTriangularMatrix, included_nodes) -> bool:
-        tree = matrix_to_tree(matrix, internal_encoder, included_nodes=included_nodes)
-        output_graph = apply_model(tree.as_cd_graph, device, model)
-        return output_graph.features[0][positive_position].item() >= args.threshold
+        return is_sound(matrix, internal_encoder, model, device, positive_position, args.threshold, included_nodes)
 
     def check_soundness(matrix: SparseTriangularMatrix) -> bool:
-        return check_soundness_with_nodes(matrix, range(d))
+        return is_sound(matrix, internal_encoder, model, device, positive_position, args.threshold)
 
     print(f"Searching over {d}x{d} triangular matrices (values 1..{max_value})...")
     value_order = value_order_table(d, max_value, internal_encoder, model)
