@@ -2,7 +2,7 @@ import time
 from typing import Callable
 
 from src.rule_extraction.lattice_search import (
-    Frontier, SinglePathFrontier, GreedyBestSuccessorFrontier, DFSFrontier, BFSFrontier, FirstResultPolicy, search,
+    Frontier, SinglePathFrontier, GreedyBestSuccessorFrontier, BFSFrontier, FirstResultPolicy, search,
 )
 from src.rule_extraction.rule_optimisation_2 import compute_path_weights, path_weight_score_fn, \
     unrestricted_var_layer_mask

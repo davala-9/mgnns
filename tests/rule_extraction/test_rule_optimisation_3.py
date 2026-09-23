@@ -2,12 +2,8 @@ import time
 import pytest
 
 from src.rule_extraction import rule_optimisation_3 as rule_optimisation_3_module
-from src.rule_extraction.rule_optimisation_3 import (
-    DFSFrontier,
-    BFSFrontier,
-    GreedyBestSuccessorFrontier,
-    RuleOptimisation3,
-)
+from src.rule_extraction.lattice_search import BFSFrontier, GreedyBestSuccessorFrontier
+from src.rule_extraction.rule_optimisation_3 import RuleOptimisation3
 
 
 class FakeSubtree:
@@ -53,22 +49,6 @@ def optimiser_factory():
     return _make
 
 
-class TestDFSFrontier:
-    def test_is_empty_initially(self):
-        assert DFSFrontier().is_empty()
-
-    def test_pop_returns_last_pushed(self):
-        frontier = DFSFrontier()
-        a, b, c = FakeSubtree("a"), FakeSubtree("b"), FakeSubtree("c")
-        frontier.push(a)
-        frontier.push(b)
-        frontier.push(c)
-        assert frontier.pop() == c
-        assert frontier.pop() == b
-        assert frontier.pop() == a
-        assert frontier.is_empty()
-
-
 class TestBFSFrontier:
     def test_is_empty_initially(self):
         assert BFSFrontier().is_empty()
@@ -89,7 +69,7 @@ class TestGraphSearch:
     def test_returns_initial_subtree_if_already_sound(self, optimiser_factory):
         root = FakeSubtree("root", sound=True)
         opt = optimiser_factory(FakeBaseTree(root))
-        result = opt.graph_search(DFSFrontier())
+        result = opt.graph_search(BFSFrontier())
         assert result == root
 
     def test_finds_sound_successor(self, optimiser_factory):
@@ -103,7 +83,7 @@ class TestGraphSearch:
         leaf = FakeSubtree("leaf", sound=False)
         root = FakeSubtree("root", successors=[leaf], sound=False)
         opt = optimiser_factory(FakeBaseTree(root))
-        result = opt.graph_search(DFSFrontier())
+        result = opt.graph_search(BFSFrontier())
         assert result is None
 
     def test_does_not_revisit_explored_nodes(self, optimiser_factory):
@@ -123,7 +103,7 @@ class TestGraphSearch:
         opt = optimiser_factory(FakeBaseTree(root))
         times = iter([0.0, 100.0])
         monkeypatch.setattr(time, "monotonic", lambda: next(times, 100.0))
-        result = opt.graph_search(DFSFrontier(), timeout=1.0)
+        result = opt.graph_search(BFSFrontier(), timeout=1.0)
         assert result is None
 
 
@@ -180,9 +160,9 @@ class TestMinimiseRule:
                 return None  # simulate a timeout on the first attempt
             return original_graph_search(frontier, timeout=timeout)
         opt.graph_search = fake_graph_search
-        result = opt.minimise_rule(fallback_frontier_factory=DFSFrontier)
+        result = opt.minimise_rule(fallback_frontier_factory=lambda: GreedyBestSuccessorFrontier(lambda node: 0))
         assert result == target
-        assert calls == ["BFSFrontier", "DFSFrontier"]
+        assert calls == ["BFSFrontier", "GreedyBestSuccessorFrontier"]
 
 
 class TestGreedyClimbFrontier:

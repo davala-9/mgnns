@@ -1,5 +1,3 @@
-import heapq
-import itertools
 import time
 from collections import deque
 from typing import Callable, Protocol
@@ -72,18 +70,6 @@ class GreedyBestSuccessorFrontier:
         return self._best_item is None
 
 
-class DFSFrontier:
-    needs_dedup = True  # explores multiple branches, which can reconverge on the same state
-    def __init__(self):
-        self._stack: list[CompactSubTree] = []
-    def push(self, item: CompactSubTree) -> None:
-        self._stack.append(item)
-    def pop(self) -> CompactSubTree:
-        return self._stack.pop()
-    def is_empty(self) -> bool:
-        return len(self._stack) == 0
-
-
 class BFSFrontier:
     needs_dedup = True  # explores multiple branches, which can reconverge on the same state
     def __init__(self):
@@ -96,23 +82,6 @@ class BFSFrontier:
         return len(self._queue) == 0
 
 
-class PriorityFrontier:
-    """Pops the highest-scored pending node first (ties broken FIFO).
-    NOTE: unlike BFSFrontier, this does not visit nodes in non-decreasing rank order, so pairing it
-    with FirstResultPolicy does NOT guarantee the smallest sound node -- just the first one found."""
-    needs_dedup = True  # explores multiple branches, which can reconverge on the same state
-    def __init__(self, score_fn: Callable[[CompactSubTree], float]):
-        self._heap: list[tuple[float, int, CompactSubTree]] = []
-        self._counter = itertools.count()
-        self._score_fn = score_fn
-    def push(self, item: CompactSubTree) -> None:
-        heapq.heappush(self._heap, (-self._score_fn(item), next(self._counter), item))
-    def pop(self) -> CompactSubTree:
-        return heapq.heappop(self._heap)[2]
-    def is_empty(self) -> bool:
-        return not self._heap
-
-
 class ResultPolicy(Protocol):
     # Called only on nodes not already dominated. Returns True if the whole search should stop now.
     def accept(self, node: CompactSubTree) -> bool: ...
@@ -121,8 +90,8 @@ class ResultPolicy(Protocol):
 
 
 class FirstResultPolicy:
-    """Stop at the first sound node found. See PriorityFrontier's note above for the caveat about
-    what "first found" does and doesn't guarantee."""
+    """Stop at the first sound node found. With BFSFrontier this is one of the smallest sound nodes;
+    with a single-path greedy frontier it is just the first sound node on that path."""
     def accept(self, node: CompactSubTree) -> bool:
         return True
     def is_dominated(self, node: CompactSubTree) -> bool:
@@ -148,12 +117,9 @@ def search(base_tree: TreeShapedConjunction, check_soundness: Callable[[CompactS
     `frontier` produces them, until the frontier is exhausted, `policy.accept` says to stop, or
     `deadline` (an absolute time.monotonic() value) passes."""
     root = base_tree.initial_compact
-    # Frontiers that explore more than one branch (BFS/DFS/PriorityFrontier) need this: two different
-    # paths can add the same atoms in a different order and reconverge on an equal CompactSubTree, so
-    # without it the same state would be (re-)expanded repeatedly. A single-path greedy climb
-    # (SinglePathFrontier/GreedyBestSuccessorFrontier, frontier.needs_dedup == False) never backtracks
-    # and only ever grows, so it can never revisit a state -- tracking `seen` for one of those would
-    # just hash and retain every discarded alternative for the rest of the run, for no benefit.
+    # A frontier that explores more than one branch (BFSFrontier) needs a `seen` set: two paths can add
+    # the same atoms in a different order and reconverge on an equal CompactSubTree. A single-path
+    # greedy climb (needs_dedup == False) only ever grows, so it can never revisit a state.
     needs_dedup = getattr(frontier, "needs_dedup", True)
     seen = {root} if needs_dedup else None
     frontier.push(root)

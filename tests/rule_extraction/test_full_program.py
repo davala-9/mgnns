@@ -8,7 +8,7 @@ from src.encodings.noncanonical.iclr22 import ICLREncoderDecoder
 from src.model.gnn_architectures import GNN
 from src.rule_extraction import full_program as full_program_module
 from src.rule_extraction.full_program import EquivalentProgramExtractor
-from src.rule_extraction.lattice_search import DFSFrontier, GreedyBestSuccessorFrontier
+from src.rule_extraction.lattice_search import BFSFrontier, SinglePathFrontier, GreedyBestSuccessorFrontier
 
 
 class FakeSubtree:
@@ -89,7 +89,7 @@ class TestExtractSmallestRulesFor:
         a = FakeSubtree("a", sound=True)
         root = FakeSubtree("root", successors=[a], sound=False)
         extractor = make_extractor(0, root)
-        results = list(extractor.extract_smallest_rules_for(0, deadline=None, frontier_factory=DFSFrontier))
+        results = list(extractor.extract_smallest_rules_for(0, deadline=None, frontier_factory=SinglePathFrontier))
         assert results == [a]
 
 
@@ -114,7 +114,7 @@ class TestHailMary:
         a = FakeSubtree("a", sound=True)
         root = FakeSubtree("root", successors=[a], sound=False)
         extractor = make_extractor(0, root)
-        result = next(extractor.hail_mary(0, frontier_factory=DFSFrontier), None)
+        result = next(extractor.hail_mary(0, frontier_factory=BFSFrontier), None)
         assert result == a
 
 

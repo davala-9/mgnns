@@ -2,7 +2,6 @@ import time
 
 from src.rule_extraction.lattice_search import (
     BFSFrontier,
-    PriorityFrontier,
     SinglePathFrontier,
     GreedyBestSuccessorFrontier,
     FirstResultPolicy,
@@ -10,10 +9,8 @@ from src.rule_extraction.lattice_search import (
     search,
 )
 
-# BFSFrontier/DFSFrontier are also exercised via tests/rule_extraction/test_rule_optimisation_3.py, which
-# imports them through rule_optimisation_3.py's re-export. This file focuses on what's new here:
-# PriorityFrontier, SinglePathFrontier's single-path commitment, GreedyBestSuccessorFrontier, and the
-# search()/policy machinery.
+# BFSFrontier is also exercised via tests/rule_extraction/test_rule_optimisation_3.py. This file focuses on
+# SinglePathFrontier's single-path commitment, GreedyBestSuccessorFrontier, and the search()/policy machinery.
 
 
 class FakeSubtree:
@@ -133,35 +130,11 @@ class TestGreedyBestSuccessorFrontier:
         assert better_but_discarded.soundness_calls == 0  # never even checked, let alone expanded
 
 
-class TestPriorityFrontier:
-    def test_pops_highest_score_first(self):
-        frontier = PriorityFrontier(score_fn=lambda x: x)
-        for x in [3, 1, 4, 1, 5]:
-            frontier.push(x)
-        popped = []
-        while not frontier.is_empty():
-            popped.append(frontier.pop())
-        assert popped == [5, 4, 3, 1, 1]
-
-    def test_ties_broken_fifo(self):
-        frontier = PriorityFrontier(score_fn=lambda x: 0)  # every item scores the same
-        for x in ["a", "b", "c"]:
-            frontier.push(x)
-        assert [frontier.pop(), frontier.pop(), frontier.pop()] == ["a", "b", "c"]
-
-    def test_is_empty(self):
-        frontier = PriorityFrontier(score_fn=lambda x: x)
-        assert frontier.is_empty()
-        frontier.push(1)
-        assert not frontier.is_empty()
-
-
 class TestSearchDedupOptOut:
     def test_needs_dedup_defaults(self):
         assert SinglePathFrontier.needs_dedup is False
         assert GreedyBestSuccessorFrontier.needs_dedup is False
         assert BFSFrontier.needs_dedup is True
-        assert PriorityFrontier.needs_dedup is True
 
     def test_frontiers_that_opt_out_of_dedup_revisit_a_content_equal_node(self):
         # SinglePathFrontier/GreedyBestSuccessorFrontier never backtrack, so a state can never actually
