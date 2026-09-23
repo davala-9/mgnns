@@ -114,13 +114,13 @@ experiment_name
 └── explanations.txt
 ```
 
-- `external_encoder.tsv` and `internal_encoder.tsv` are the two encoders (see "Encodings" below).
+- `external_encoder.tsv` and `internal_encoder.tsv` are the two encoders (see "Code map" below).
   `checkpoints`, `model.pt` and the encoder files are only written when the model is trained, not when it is loaded.
 - `valid_metrics.txt` and `test_metrics.txt` give precision, recall, accuracy and F1 at a range of thresholds, plus
   the area under the precision-recall curve.
 - `predicted_triples.tsv` lists the facts the model derives on the test graph, from highest to lowest score.
   `predicted_triples_scored.tsv` is the same with each fact's score (its value in the model's last layer).
-- `program.txt` is the extracted program (see "Rule extraction" below).
+- `program.txt` is the extracted program, one rule per head predicate and subtree found (see `full_program.py`).
 - `explanations.txt` lists the highest-scoring test predictions (`N_FACTS_TO_EXPLAIN` in `run_experiment.py`),
   each followed by a rule that explains it.
 
