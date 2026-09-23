@@ -43,6 +43,11 @@ class EC_GCNConv(MessagePassing):
 
 class GNN(torch.nn.Module):
 
+    # The last layer computes sigmoid(x - OUTPUT_SHIFT) rather than sigmoid(x). Since the biases are unconstrained
+    # this is mathematically irrelevant, but the models were trained with it, so bias(2) includes it too.
+    # Note: saved model.pt files pickle whole GNN instances, so new state must not be added to __init__.
+    OUTPUT_SHIFT = 10
+
     def __init__(self, feature_dimension, num_edge_colours, aggregation_1, aggregation_2):
         super(GNN, self).__init__()
 
@@ -78,55 +83,31 @@ class GNN(torch.nn.Module):
 
         # Layer 2
         x = self.lin_self_2(x) + self.conv2(x, edge_index, edge_colour)
-        # Note: this translation is irrelevant since the bias vectors are not
-        # constrained to the positive reals, therefore it isn't mentioned in
-        # the report. However, I've left it here for completeness since the
-        # models were trained with it.
-        x = self.output(x - 10)
+        x = self.output(x - self.OUTPUT_SHIFT)
 
         return x, features_1
 
     def layer_dimension(self, layer):
         return self.dimensions[layer]
 
-    def matrix_A(self, layer):
-        if layer == 1:
-            return self.lin_self_1.weight.detach()
-        elif layer == 2:
-            return self.lin_self_2.weight.detach()
-        else:
+    # Returns the element of `per_layer` (a pair: layer 1, layer 2) that belongs to `layer`.
+    def _for_layer(self, layer, per_layer):
+        if layer not in (1, 2):
             raise ValueError(f"invalid layer: {layer!r} (model has {self.num_layers} layers)")
+        return per_layer[layer - 1]
+
+    def matrix_A(self, layer):
+        return self._for_layer(layer, (self.lin_self_1, self.lin_self_2)).weight.detach()
 
     def matrix_B(self, layer, colour):
-        if layer == 1:
-            return self.conv1.weights[colour].detach()
-        elif layer == 2:
-            return self.conv2.weights[colour].detach()
-        else:
-            raise ValueError(f"invalid layer: {layer!r} (model has {self.num_layers} layers)")
+        return self._for_layer(layer, (self.conv1, self.conv2)).weights[colour].detach()
 
     def bias(self, layer):
-        if layer == 1:
-            return self.lin_self_1.bias.detach()
-        elif layer == 2:
-            return self.lin_self_2.bias.detach() - 10
-        else:
-            raise ValueError(f"invalid layer: {layer!r} (model has {self.num_layers} layers)")
+        bias = self._for_layer(layer, (self.lin_self_1, self.lin_self_2)).bias.detach()
+        return bias - self.OUTPUT_SHIFT if layer == 2 else bias
 
     def activation(self, layer):
-        if layer == 1:
-            return torch.relu
-        elif layer == 2:
-            m = torch.nn.Sigmoid()
-            return m
-        else:
-            raise ValueError(f"invalid layer: {layer!r} (model has {self.num_layers} layers)")
+        return self._for_layer(layer, (torch.relu, torch.nn.Sigmoid()))
 
     def aggregation_function(self, layer):
-        if layer == 1:
-            return self.agg_1
-        elif layer == 2:
-            return self.agg_2
-        else:
-            raise ValueError(f"invalid layer: {layer!r} (model has {self.num_layers} layers)")
-#
+        return self._for_layer(layer, (self.agg_1, self.agg_2))

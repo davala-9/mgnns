@@ -24,6 +24,15 @@ def _require_float(data: dict, key: str) -> float:
         raise ValueError(f"{key} value must be a float, got {value!r}") from e
 
 
+def _require_enum(data: dict, key: str, enum_type: type[Enum], description: str):
+    value = _require(data, key)
+    try:
+        return enum_type(value)
+    except ValueError as e:
+        valid = " or ".join(f'"{t.value}"' for t in enum_type)
+        raise ValueError(f"{description} not valid: please choose {valid}") from e
+
+
 def _require_bool(data: dict, key: str) -> bool:
     value = _require(data, key)
     if not isinstance(value, bool):
@@ -58,26 +67,9 @@ class ExperimentConfig:
             raise ValueError(f"experiment path is not an existing folder: {exp_path}")
         self.exp_dir = exp_path
 
-        encoding_scheme = _require(data, "encoding_scheme")
-        try:
-            self.encoding_scheme = EncoderType(encoding_scheme)
-        except ValueError as e:
-            valid = " or ".join(f'"{t.value}"' for t in EncoderType)
-            raise ValueError(f"encoder type not valid: please choose {valid}") from e
-
-        agg_function_1 = _require(data, "agg_function_1")
-        try:
-            self.agg_function_1 = AggregationType(agg_function_1)
-        except ValueError as e:
-            valid = " or ".join(f'"{t.value}"' for t in AggregationType)
-            raise ValueError(f"aggregation function not valid: please choose {valid}") from e
-
-        agg_function_2 = _require(data, "agg_function_2")
-        try:
-            self.agg_function_2 = AggregationType(agg_function_2)
-        except ValueError as e:
-            valid = " or ".join(f'"{t.value}"' for t in AggregationType)
-            raise ValueError(f"aggregation function not valid: please choose {valid}") from e
+        self.encoding_scheme = _require_enum(data, "encoding_scheme", EncoderType, "encoder type")
+        self.agg_function_1 = _require_enum(data, "agg_function_1", AggregationType, "aggregation function")
+        self.agg_function_2 = _require_enum(data, "agg_function_2", AggregationType, "aggregation function")
 
         self.derivation_threshold = _require_float(data, "derivation_threshold")
         if not 0 <= self.derivation_threshold <= 1:
