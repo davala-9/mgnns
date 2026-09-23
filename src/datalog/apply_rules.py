@@ -111,6 +111,20 @@ def parse_rule(rule: str) -> Tuple[Atom, List[Atom]]:
                 raise ValueError(f"malformed body in rule {original!r}: {e}") from e
     return head, body
 
+# Writes a fact over variable names as a rule atom, e.g. ("X0", TYPE_PRED, "A") -> "<A>[?X0]" and
+# ("X1", "R", "X0") -> "<R>[?X1,?X0]". The inverse of parse_atom.
+def format_atom(fact: Fact) -> str:
+    s, p, o = fact
+    if p == TYPE_PRED:
+        return "<{}>[?{}]".format(o, s)
+    return "<{}>[?{},?{}]".format(p, s, o)
+
+# Writes a rule "head :- body ." from a head fact and body facts over variable names (duplicate body atoms
+# are dropped). The inverse of parse_rule.
+def format_rule(head: Fact, body) -> str:
+    body_atoms = [format_atom(fact) for fact in dict.fromkeys(body)]
+    return format_atom(head) + " :- " + ", ".join(body_atoms) + " ."
+
 # Tries to ground a term (i.e. variable or constant) with a given binding, which we assume covers this term
 def ground_term(term: str, binding: Binding) -> str:
     if is_var(term):

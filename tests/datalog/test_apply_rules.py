@@ -2,7 +2,7 @@ import pytest
 
 from src.datalog.apply_rules import (
     is_var, match_term, match_atom, split_atoms, parse_atom,
-    parse_rule, ground_term, apply_rule, UnsafeRuleWarning,
+    parse_rule, ground_term, apply_rule, UnsafeRuleWarning, format_atom, format_rule,
 )
 from src.utils.utils import TYPE_PRED
 
@@ -234,3 +234,27 @@ def test_apply_rule_unsafe_unary_head_warns():
     facts = {("rex", TYPE_PRED, "_dog")}
     with pytest.warns(UnsafeRuleWarning, match=r"\?X"):
         apply_rule(rule, facts)
+
+
+# --- format_atom / format_rule ---
+
+def test_format_atom_unary():
+    assert format_atom(("X0", TYPE_PRED, "A")) == "<A>[?X0]"
+
+def test_format_atom_binary():
+    assert format_atom(("X1", "R", "X0")) == "<R>[?X1,?X0]"
+
+def test_format_rule_drops_duplicate_body_atoms_keeping_order():
+    body = [("X1", "R", "X0"), ("X0", TYPE_PRED, "A"), ("X1", "R", "X0")]
+    assert format_rule(("X0", TYPE_PRED, "B"), body) == "<B>[?X0] :- <R>[?X1,?X0], <A>[?X0] ."
+
+def test_format_rule_empty_body():
+    assert format_rule(("X0", TYPE_PRED, "B"), []) == "<B>[?X0] :-  ."
+
+def test_format_rule_round_trips_through_parse_rule():
+    rule = format_rule(("X0", "S", "X1"), [("X0", TYPE_PRED, "A"), ("X2", "R", "X1")])
+    assert parse_rule(rule) == (("S", ["?X0", "?X1"]), [("A", ["?X0"]), ("R", ["?X2", "?X1"])])
+
+def test_format_rule_output_is_applicable():
+    rule = format_rule(("X0", TYPE_PRED, "B"), [("X1", "R", "X0")])
+    assert apply_rule(rule, {("b", "R", "a")}) == {("a", TYPE_PRED, "B")}

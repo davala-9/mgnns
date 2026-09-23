@@ -143,7 +143,7 @@ def explain_facts(ef,predictions,device,model,cfg,trace,external_encoder, intern
         for fact in sorted_predictions[:20]:  # TODO: replace magic number with parameter
             rule = explainer.explain_fact(fact)
             output.write("{}\n".format(fact))
-            output.write(rule + '\n')
+            output.write(rule + '\n\n')
 
 if __name__ == "__main__":
     parser = create_parser()

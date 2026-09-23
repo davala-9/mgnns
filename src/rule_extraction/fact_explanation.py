@@ -11,7 +11,7 @@ from src.utils.bitset import BitSet
 from src.rule_extraction.rule_optimisation_1 import apply_optimisation as apply_optimisation_1
 from src.rule_extraction.rule_optimisation_2 import apply_optimisation as apply_optimisation_2
 from src.rule_extraction.rule_optimisation_3 import RuleOptimisation3
-from src.datalog.apply_rules import apply_rule
+from src.datalog.apply_rules import apply_rule, format_rule
 
 # We bundle a bunch of auxiliary info about a fact we want to explain
 class FactContext:
@@ -133,19 +133,8 @@ class FactExplainer:
             head_predicate=head_predicate,
             grounding_context=GroundContext(fact, self.cd_graph, var_const_idx))
 
-        # Write the rule
-        body_atoms = []
         rule_body = set(rule_body)  # Remove duplicates
-        for (s, p, o) in rule_body:
-            if p == TYPE_PRED:
-                body_atoms.append("<{}>[?{}]".format(o, s))
-            else:
-                body_atoms.append("<{}>[?{},?{}]".format(p, s, o))
-        if head[1] != TYPE_PRED:
-            written_head =  "<{}>[?{},?{}]".format(head[1], head[0], head[2])
-        else:
-            written_head = "<{}>[?{}]".format(head[2], head[0])
-        rule = written_head + " :- " + ", ".join(body_atoms) + " .\n"
+        rule = format_rule(head, rule_body)
 
         # Verify that the rule is sound:
         if not rule_body: # Soundness check algorithm for rules with empty body TODO: generalise this like in the paper

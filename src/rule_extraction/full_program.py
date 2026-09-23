@@ -1,5 +1,6 @@
 from typing import Callable
 
+from src.datalog.apply_rules import format_rule
 from src.encodings.canonical import CanonicalEncoderDecoder
 from src.encodings.noncanonical.iclr22 import ICLREncoderDecoder
 from src.encodings.noncanonical.noncanonical import NonCanonicalEncoder
@@ -11,7 +12,7 @@ from src.rule_extraction.rule_optimisation_2 import compute_path_weights, path_w
 from src.rule_extraction.tree_shaped_conjunction import TreeShapedConjunction, TreeShapedConjunctionBuilder
 from src.rule_extraction.typed_constraint import TypedConstraint
 from src.utils.bitset import BitSet
-from src.utils.utils import backpropagate_relevance, TYPE_PRED
+from src.utils.utils import backpropagate_relevance
 import time
 
 # Filters var_id's own-feature mask through every given typed_constraint's always_zero constraint for
@@ -176,33 +177,18 @@ class EquivalentProgramExtractor:
         rule_body = self.base_tree[pred_pos].extract_from_compact(compressed_rule_body)
         head_can_predicate = self.internal_encoder.get_unary_predicate_for_position(pred_pos)
         head_pred = self.external_encoder.unary_can_predicate_to_data_predicate(head_can_predicate)
-        head_pred_arity = self.external_encoder.unary_can_predicate_to_data_predicate_arity(
-            head_can_predicate)
         rule_bodies, head = self.external_encoder.unfold_all(
             can_conj=rule_body, internal_encoder=self.internal_encoder, head_predicate=head_pred)
         for rule_body in rule_bodies:
             if frozenset(rule_body) not in rules_for_this_predicate:
                 rules_for_this_predicate.add(frozenset(rule_body))
-                # Write the rule
-                body_atoms = []
-                rule_body = set(rule_body)  # Remove duplicates
-                for (s, p, o) in rule_body:
-                    if p == TYPE_PRED:
-                        body_atoms.append("<{}>[?{}]".format(o, s))
-                    else:
-                        body_atoms.append("<{}>[?{},?{}]".format(p, s, o))
-                if head_pred_arity == 2:
-                    written_head = "<{}>[?{},?{}]".format(head[1], head[0], head[2])
-                else:
-                    written_head = "<{}>[?{}]".format(head[2], head[0])
-                rule = written_head + " :- " + ", ".join(body_atoms) + " .\n"
-                output.write(rule + '\n')
+                output.write(format_rule(head, set(rule_body)) + '\n\n')
 
 
     def get_all_rules(self, program_file, time_budget, predicate_positions=None):
         if predicate_positions is None:
             predicate_positions = range(self.internal_encoder.get_n_unary_predicates())
-        with (open(program_file, 'w') as output):
+        with open(program_file, 'w') as output:
             for pred_pos in predicate_positions:
                 deadline = time.monotonic() + time_budget if time_budget is not None else None
                 rules_for_this_predicate = set()
