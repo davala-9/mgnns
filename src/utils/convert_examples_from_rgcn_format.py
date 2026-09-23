@@ -1,26 +1,17 @@
+# Converts an examples file in the R-GCN format (a header line, then "entity\tid\tclass" lines) into a tsv file
+# of unary facts "entity\trdf:type\tclass".
 import argparse
 
-parser = argparse.ArgumentParser()
-parser.add_argument('--input',
-                    help='Name of the input file.')
-parser.add_argument('--output',
-                    help='Name of the output file.')
-args = parser.parse_args()
-
-type_pred =  "http://www.w3.org/1999/02/22-rdf-syntax-ns#type"
+from src.utils.utils import TYPE_PRED
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--input', required=True, help='Name of the input file.')
+    parser.add_argument('--output', required=True, help='Name of the output file.')
+    args = parser.parse_args()
 
-    output_file = open(args.output, 'w')
-    
-    input_file = open(args.input, 'r')
-    first_line = True 
-    for line in input_file.readlines():
-        if not first_line:
+    with open(args.input, 'r') as input_file, open(args.output, 'w') as output_file:
+        next(input_file, None)  # Skip the header line
+        for line in input_file:
             s, p, o = line.split()
-            output_file.write("{}\t{}\t{}\n".format(s, type_pred, o))
-        if first_line:
-            first_line = False
-    input_file.close()
-    output_file.close()
-
+            output_file.write("{}\t{}\t{}\n".format(s, TYPE_PRED, o))
