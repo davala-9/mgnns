@@ -29,3 +29,8 @@ src/old/
 # ADNI data: its conditions of use forbid redistribution, so it must never be committed
 data/node_classification/AD1/
 data/node_classification/AD2/
+
+# Datasets not tracked for now
+data/node_classification/bursi4204/
+data/node_classification/mutag_tud/
+data/node_classification/new_bursi4204/
