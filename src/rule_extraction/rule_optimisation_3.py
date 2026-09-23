@@ -8,6 +8,9 @@ from src.rule_extraction.rule_optimisation_2 import compute_path_weights, path_w
     unrestricted_var_layer_mask
 from src.rule_extraction.tree_shaped_conjunction import TreeShapedConjunction
 
+# How long minimise_rule's exhaustive BFS may run before it falls back to a greedy climb.
+BFS_TIMEOUT_SECONDS = 120
+
 # Takes a TreeShapedConjunction and attempts to find a minimal sound subtree, as another #TreeShapedConjunction.
 # It spends some amount of time trying minimal extraction with BFS, then it gives up and uses greedy path climb.
 class RuleOptimisation3:
@@ -38,7 +41,7 @@ class RuleOptimisation3:
 
     # Returns a minimal compact subtree
     def minimise_rule(self, fallback_frontier_factory: Callable[[], Frontier] = SinglePathFrontier):
-        result = self.graph_search(BFSFrontier(),timeout=120)
+        result = self.graph_search(BFSFrontier(), timeout=BFS_TIMEOUT_SECONDS)
         if result is None:
             print("BFS rule simplification timed out, trying a greedy climb...")
             result = self.graph_search(fallback_frontier_factory())

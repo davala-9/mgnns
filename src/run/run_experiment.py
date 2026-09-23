@@ -18,6 +18,11 @@ from datetime import datetime
 from pathlib import Path
 import shutil
 
+# Time (in seconds) the exhaustive rule search gets per head predicate before falling back to a Hail Mary.
+PROGRAM_EXTRACTION_TIME_BUDGET_SECONDS = 5
+# How many of the highest-scoring test predictions get an explanation rule.
+N_FACTS_TO_EXPLAIN = 20
+
 # Create parser to parse all arguments of the script
 def create_parser():
     parser = argparse.ArgumentParser()
@@ -131,7 +136,7 @@ def extract_program(ef, device, model, threshold, external_encoder, internal_enc
     if predicate is not None:
         predicate_positions = [program_extractor.resolve_predicate_position(predicate)]
     program_extractor.compute_all_upper_bounds(predicate_positions)
-    program_extractor.get_all_rules(program_file, 5, predicate_positions)
+    program_extractor.get_all_rules(program_file, PROGRAM_EXTRACTION_TIME_BUDGET_SECONDS, predicate_positions)
 
 def explain_facts(ef,predictions,device,model,cfg,trace,external_encoder, internal_encoder, test_graph_dataset):
     print("Computing prediction explanations...")
@@ -140,7 +145,7 @@ def explain_facts(ef,predictions,device,model,cfg,trace,external_encoder, intern
     explainer = FactExplainer(device, model, cfg.derivation_threshold, trace, external_encoder, internal_encoder,
                               test_graph_dataset)
     with open(explanations_file, 'w') as output:
-        for fact in sorted_predictions[:20]:  # TODO: replace magic number with parameter
+        for fact in sorted_predictions[:N_FACTS_TO_EXPLAIN]:
             rule = explainer.explain_fact(fact)
             output.write("{}\n".format(fact))
             output.write(rule + '\n\n')

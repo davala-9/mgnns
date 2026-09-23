@@ -1,50 +1,29 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-@author: ----
-"""
 from numpy import arange
 from numpy import trapezoid
 from numpy import nan_to_num
 from src.utils.data_parser import parse
 from src.utils.utils import check
 
+# The thresholds at which the metrics are reported: very fine near 0 and 1, every 0.01 in between.
+THRESHOLDS = [round(elem, 10) for elem in
+              [0, 0.0000000001, 0.000000001, 0.00000001, 0.0000001, 0.000001, 0.00001, 0.0001, 0.001]
+              + arange(0.01, 1, 0.01).tolist()
+              + [0.999, 0.9999, 0.99999, 0.999999, 0.9999999, 0.99999999, 0.999999999, 0.9999999999, 0.99999999999]]
+
+def _ratio(numerator, denominator):
+    return numerator / denominator if denominator != 0 else float("NaN")
 
 def precision(tp, fp): # Precision: true positives / positives
-    value = 0
-    try:
-        value = tp / (tp + fp)
-    except:
-        value = float("NaN")
-    finally:
-        return value
+    return _ratio(tp, tp + fp)
 
 def recall(tp, fn): # Recall: true positives / positive examples
-    value = 0
-    try:
-        value = tp / (tp + fn)
-    except:
-        value = float("NaN")
-    finally:
-        return value
+    return _ratio(tp, tp + fn)
 
 def accuracy(tp, fp, tn, fn): # Accuracy: correct predictions
-    value = 0
-    try:
-        value = (tn + tp) / (tp + fp + tn + fn)
-    except:
-        value = float("NaN")
-    finally:
-        return value
+    return _ratio(tn + tp, tp + fp + tn + fn)
 
 def f1score(tp, fp, fn):
-    value = 0
-    try:
-        value = tp / (tp + 0.5 * (fp + fn))
-    except:
-        value = float("NaN")
-    finally:
-        return value
+    return _ratio(tp, tp + 0.5 * (fp + fn))
 
 def auprc(precision_vector, recall_vector):
     return -1 * trapezoid(precision_vector, recall_vector)
@@ -52,10 +31,7 @@ def auprc(precision_vector, recall_vector):
 
 def compute_metrics(predictions, positive_examples, negative_examples, metrics_file):
 
-    threshold_list = [0,0.0000000001, 0.000000001, 0.000000001, 0.00000001, 0.0000001, 0.000001, 0.00001, 0.0001,
-                      0.001] + arange(0.01, 1, 0.01).tolist() + [0.999, 0.9999, 0.99999, 0.999999, 0.9999999,
-                                                                 0.99999999, 0.999999999, 0.9999999999, 0.99999999999]
-    threshold_list = [round(elem, 10) for elem in threshold_list]
+    threshold_list = THRESHOLDS
 
     # Each threshold is mapped to a 4-tuple containing true and false positives and negatives.
     threshold_to_counter = {}

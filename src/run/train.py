@@ -13,6 +13,15 @@ from src.config.config import ExperimentConfig
 from src.model.cd_graph import CDGraph
 from src.utils.utils import TYPE_PRED
 
+# Training hyperparameters.
+LEARNING_RATE = 0.01
+WEIGHT_DECAY = 5e-4
+NEGATIVE_EXAMPLE_WEIGHT = 0.5  # loss weight wherever the target is 0
+POSITIVE_EXAMPLE_WEIGHT = 5.0  # loss weight wherever the target is 1
+MAX_EPOCHS = 20000
+EARLY_STOPPING_PATIENCE = 50  # stop after this many consecutive epochs without a new lowest loss
+REPORT_EVERY_N_EPOCHS = 200
+CHECKPOINT_EVERY_N_EPOCHS = 1000
 
 def train(cfg: ExperimentConfig, device, internal_encoder: CanonicalEncoderDecoder, model,
           cd_graph: CDGraph, train_examples, experiment_folder) :
@@ -39,8 +48,7 @@ def train(cfg: ExperimentConfig, device, internal_encoder: CanonicalEncoderDecod
     train_loader = DataLoader(dataset=[train_data.to(device)], batch_size=1)
 
     # Select Adam as the optimisation algorithm
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.01, weight_decay=5e-4)
-    # optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=5e-4)
+    optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
 
     checkpoints_folder = experiment_folder / "checkpoints"
     if not os.path.exists(checkpoints_folder):
@@ -77,10 +85,9 @@ def train(cfg: ExperimentConfig, device, internal_encoder: CanonicalEncoderDecod
             loss = lossFunc(output, label)
             # Double check we're not getting NaNs
             assert(not (loss != loss).any())
-            # We give different weight to positive and negative examples; we construct a weight matrix with weight of
-            # 5.0 wherever there is a 1 output in the y vector and a 1.0 where there is a 0 (previously 0.5/5 or 0.1/10)
-            # weight = torch.tensor([1.0, 5.0]).to(device)
-            weight = torch.tensor([0.5, 5.0]).to(device)
+            # Weight positive and negative examples differently: a weight matrix with POSITIVE_EXAMPLE_WEIGHT
+            # wherever y is 1 and NEGATIVE_EXAMPLE_WEIGHT wherever it is 0.
+            weight = torch.tensor([NEGATIVE_EXAMPLE_WEIGHT, POSITIVE_EXAMPLE_WEIGHT]).to(device)
             weight_ = weight[y.data.long()].view_as(y)
             loss = loss * weight_
             # Use sum reduction on loss, backpropagate
@@ -94,27 +101,23 @@ def train(cfg: ExperimentConfig, device, internal_encoder: CanonicalEncoderDecod
 
         return total_loss
 
-    divisor = 200 # How often we'll report progress of GNN
-
-    # Implementing a form of early stopping. Keep track of the lowest loss achieved, if we've had max_num_bad epochs
-    # only achieving higher losses than the lowest one recorded, then stop early.
+    # Early stopping: keep track of the lowest loss achieved, and stop once more than EARLY_STOPPING_PATIENCE
+    # consecutive epochs have failed to improve on it.
     min_loss = None
     num_bad_iterations = 0
-    max_num_bad = 50
 
     print("Training model")
-    # Train for a maximum of 20000 epochs, but expect to stop early
-    for epoch in range(20000): # TODO: include these numbers in the experiment configuration
+    for epoch in range(MAX_EPOCHS):
         loss = train_epoch()
         if min_loss is None: min_loss = loss
-        if epoch % divisor == 0:
+        if epoch % REPORT_EVERY_N_EPOCHS == 0:
             print('Epoch: {:03d}, Loss: {:.5f}'.
                   format(epoch, loss))
-            if epoch % 1000 == 0: # Save checkpoint for each 1000 epochs
-                torch.save(model, checkpoints_folder / "{}_Epoch{}.pt".format("model", epoch))
+        if epoch % CHECKPOINT_EVERY_N_EPOCHS == 0:
+            torch.save(model, checkpoints_folder / "{}_Epoch{}.pt".format("model", epoch))
         if loss >= min_loss:
             num_bad_iterations += 1
-            if num_bad_iterations > max_num_bad:
+            if num_bad_iterations > EARLY_STOPPING_PATIENCE:
                 print("Stopping early")
                 break
         else:
