@@ -4,7 +4,6 @@ import torch
 from pathlib import Path
 
 from src.config.config import EncoderType
-from src.encodings.canonical import CanonicalEncoderDecoder
 from src.run.run_experiment import load_model, load_encoder, extract_program
 
 if __name__ == "__main__":

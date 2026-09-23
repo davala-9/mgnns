@@ -35,7 +35,9 @@ class BitSet:
     def add_element(self,element):
         if element >= self.dimension:
             raise ValueError(f"Cannot add element {element} to a bitset of dimension {self.dimension}")
-        return BitSet.from_subset(self.dimension,self.as_set().union({element}))
+        if element < 0:
+            raise ValueError(f"Cannot add negative element {element} to a bitset")
+        return BitSet(self.dimension, self.mask | (1 << element))
 
     def subsetOf(self, other):
         if self.dimension != other.dimension:
@@ -74,9 +76,6 @@ class BitSet:
 
     def is_empty(self):
         return self.mask == 0
-
-    def clone(self):
-        return BitSet(dimension=self.dimension, mask=self.mask)
 
     def to_empty_compressed(self):
         k = bin(self.mask).count("1")

@@ -86,7 +86,7 @@ class FactExplainer:
     def explain_fact(self, fact: tuple[str,str,str]):
 
         fact_context = FactContext(fact, self.external_encoder, self.internal_encoder, self.constant_to_index)
-        assert self.activations[2][fact_context.cd_fact_const_index][fact_context.cd_fact_pred_pos] > self.threshold, \
+        assert self.activations[self.model.num_layers][fact_context.cd_fact_const_index][fact_context.cd_fact_pred_pos] > self.threshold, \
             "Error: the fact to be explained is not derived by the model on this dataset."
 
         print("Computing Gamma_i")

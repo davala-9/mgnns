@@ -26,5 +26,4 @@ def parse(file: Path):
     elif file.suffix == '.tsv':
         return parse_as_tsv(file)
     else:
-        print("Error, data format not supported. Use .nt or .tsv")
-        return None
+        raise ValueError(f"data format of {file} not supported: use .nt or .tsv")

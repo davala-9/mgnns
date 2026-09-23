@@ -1,6 +1,5 @@
 import time
 
-import pytest
 import torch
 
 from src.encodings.canonical import CanonicalEncoderDecoder

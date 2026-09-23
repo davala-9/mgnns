@@ -66,7 +66,7 @@ def derive_matrix_from_fact(fact: tuple[str, str, str], trace, external_encoder,
     activations = trace.activations
     constant_to_index = {name: i for i, name in enumerate(cd_graph.node_names)}
     fact_context = FactContext(fact, external_encoder, internal_encoder, constant_to_index)
-    assert activations[2][fact_context.cd_fact_const_index][fact_context.cd_fact_pred_pos] > threshold, \
+    assert activations[model.num_layers][fact_context.cd_fact_const_index][fact_context.cd_fact_pred_pos] > threshold, \
         "Error: the fact to be explained is not derived by the model on this dataset."
 
     d, max_value = infer_dimensions(internal_encoder)

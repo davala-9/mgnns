@@ -1,5 +1,3 @@
-import os
-import tempfile
 import torch
 import pytest
 

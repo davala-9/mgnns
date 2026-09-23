@@ -1,6 +1,5 @@
 import yaml
 import pytest
-from pathlib import Path
 
 from src.config.config import ExperimentConfig, EncoderType, AggregationType
 

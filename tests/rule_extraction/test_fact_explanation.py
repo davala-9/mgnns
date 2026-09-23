@@ -1,15 +1,13 @@
 import time
 
-import numpy as np
 import torch
-import pytest
 
 from src.encodings.canonical import CanonicalEncoderDecoder
 from src.encodings.noncanonical.iclr22 import ICLREncoderDecoder
 from src.encodings.noncanonical.identity import IdentityEncoderDecoder
 from src.model.cd_graph import TraceCollector, CDGraph
 from src.model.gnn_architectures import GNN
-from src.model.gnn_transformation import apply_model, apply_nc_decoder
+from src.model.gnn_transformation import apply_model
 from src.rule_extraction.tree_shaped_conjunction import TreeShapedConjunction
 from src.rule_extraction.fact_explanation import FactExplainer, FactContext
 from src.utils.utils import TYPE_PRED

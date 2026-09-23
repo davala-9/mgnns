@@ -114,3 +114,9 @@ def test_add_element_out_of_range_raises():
     bs = BitSet.from_subset(5, {0, 2})
     with pytest.raises(ValueError):
         bs.add_element(5)
+
+
+def test_add_element_negative_raises():
+    bs = BitSet.from_subset(5, {0, 2})
+    with pytest.raises(ValueError):
+        bs.add_element(-1)

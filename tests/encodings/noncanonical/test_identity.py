@@ -113,7 +113,7 @@ def test_unfold_simple_tree():
 
     builder = TreeShapedConjunctionBuilder(n_colours=2)
     var_a = builder.add(features=BitSet.from_subset(2, set()), level=2, parent=-1)                  # root "a": no features
-    var_b = builder.add(features=BitSet.from_subset(2, {0}), level=0, parent=var_a, edge=(0, 0, 0))  # colour0=R -> "b": A(b)
+    builder.add(features=BitSet.from_subset(2, {0}), level=0, parent=var_a, edge=(0, 0, 0))          # colour0=R -> "b": A(b)
     var_c = builder.add(features=BitSet.from_subset(2, {0, 1}), level=1, parent=var_a, edge=(1, 1, 1))  # colour1=S -> "c": A(c), B(c)
     builder.add(features=BitSet.from_subset(2, {1}), level=0, parent=var_c, edge=(0, 0, 1))          # colour0=R -> "d": B(d)
     conj = builder.build()

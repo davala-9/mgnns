@@ -9,7 +9,6 @@ from src.model.gnn_transformation import apply_model
 from src.rule_extraction.fact_explanation import FactExplainer, FactContext
 from src.rule_extraction.rule_optimisation_1 import apply_optimisation
 from src.rule_extraction.tree_shaped_conjunction import TreeShapedConjunction
-from src.utils.bitset import BitSet
 from src.utils.utils import TYPE_PRED
 
 # ----------------------------------------------------------------------------------------------------------
