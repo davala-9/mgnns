@@ -31,30 +31,27 @@ def _better_candidates(value_order: list, i: int, j: int, current: int) -> list:
 # Can print progress.
 def greedy_climb(matrix: SparseTriangularMatrix, value_order: list, signature: AdniSignature, model,
                   check_soundness: Callable[[SparseTriangularMatrix], bool], verbose: bool = False):
+    entries = matrix.to_dict()
+    moves = []  # (score, i, j, value)
+    for i in range(matrix.d):
+        for j in range(i, matrix.d):
+            value = value_order[i][j][0]
+            if entries.get((i, j), 0) != value:
+                moves.append((heuristic_for_element(i, j, value, signature, model), i, j, value))
+    # Stable, so equal scores keep row-by-row order
+    moves.sort(key=lambda move: move[0], reverse=True)
+
     step = 0
     while not check_soundness(matrix):
-        entries = matrix.to_dict()
-        best_move = None  # (score, i, j, value)
-        cells_with_a_move = 0
-        for i in range(matrix.d):
-            for j in range(i, matrix.d):
-                remaining = _better_candidates(value_order, i, j, entries.get((i, j), 0))
-                if not remaining:
-                    continue
-                cells_with_a_move += 1
-                value = remaining[0]
-                score = heuristic_for_element(i, j, value, signature, model)
-                if best_move is None or score > best_move[0]:
-                    best_move = (score, i, j, value)
-        if best_move is None:
+        if step == len(moves):
             if verbose:
                 print(f"Greedy climb dead-ended after {step} move(s): no cell has a candidate left.")
             return None
-        score, i, j, value = best_move
+        score, i, j, value = moves[step]
         step += 1
         if verbose:
             print(f"Step {step}: set ({i}, {j}) = {value} (heuristic {score:.4f}); "
-                  f"{cells_with_a_move} cell(s) had a candidate to choose from.")
+                  f"{len(moves) - step + 1} cell(s) had a candidate to choose from.")
         matrix = matrix.with_value(i, j, value)
     if verbose:
         print(f"Greedy climb found a sound matrix after {step} move(s).")

@@ -96,6 +96,29 @@ def test_greedy_climb_returns_none_when_it_runs_out_of_moves():
     assert result is None
 
 
+def test_greedy_climb_from_a_non_empty_matrix_raises_a_cell_to_its_top_value():
+    # (0, 1) starts at its worse value 1, so its only move is to 2 -- but (1, 1) -> 2 still scores higher and goes first.
+    encoder = make_internal_encoder()
+    model = make_model()
+    table = value_order_table(AdniSignature(encoder), model)
+    matrix = SparseTriangularMatrix.empty(d=D, max_value=MAX_VALUE).with_value(0, 1, 1)
+    result = greedy_climb(matrix, table, AdniSignature(encoder), model, check_soundness=lambda m: m.get(0, 1) == 2)
+    assert result.to_dict() == {(1, 1): 2, (0, 1): 2}
+
+
+def test_greedy_climb_breaks_ties_in_row_by_row_order():
+    # An all-zero model scores every move 0, so the cells are tried in the order (0, 0), (0, 1), (1, 1).
+    encoder = make_internal_encoder()
+    model = GNN(feature_dimension=4, num_edge_colours=3, aggregation_1="max", aggregation_2="max")
+    with torch.no_grad():
+        for param in model.parameters():
+            param.zero_()
+    table = value_order_table(AdniSignature(encoder), model)
+    matrix = SparseTriangularMatrix.empty(d=D, max_value=MAX_VALUE)
+    result = greedy_climb(matrix, table, AdniSignature(encoder), model, check_soundness=lambda m: len(m.to_dict()) == 2)
+    assert set(result.to_dict()) == {(0, 0), (0, 1)}
+
+
 # Same fixture: heuristics for value 2 (the only value minimise ever needs to look up, since these
 # tests always start from the dense matrix) rank (0, 0) weakest, then (0, 1), then (1, 1) strongest --
 # so minimise always tries removing (0, 0) first, then (0, 1), then (1, 1).
