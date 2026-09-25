@@ -1,7 +1,7 @@
 import torch
 
 from src.adni.heuristic import heuristic_for_element, heuristic_for_matrix
-from src.adni.matrix_to_tree import colour_predicate_for, node_predicate_for
+from src.adni.signature import AdniSignature, colour_predicate_for, node_predicate_for
 from src.adni.sparse_triangular_matrix import SparseTriangularMatrix
 from src.encodings.canonical import CanonicalEncoderDecoder
 from src.model.gnn_architectures import GNN
@@ -51,7 +51,7 @@ def test_heuristic_for_element_matches_hand_computation():
     # relevant hidden position is only 0 (part_of_row[0] = 7 > 0; part_of_row[1] = -100 is excluded).
     # contribution at position 0 = B1[0, node] + B1[0, node_1] + A1[0, node] + A1[0, node_0]
     #                            = 2 + 3 + 1 + 4 = 10. heuristic = 7 * 10 = 70.
-    assert heuristic_for_element(i=0, j=1, value=1, internal_encoder=encoder, model=model) == 70.0
+    assert heuristic_for_element(i=0, j=1, value=1, signature=AdniSignature(encoder), model=model) == 70.0
 
 
 def test_heuristic_for_element_depends_on_i():
@@ -60,7 +60,7 @@ def test_heuristic_for_element_depends_on_i():
     # (0, 1) = 1 uses node_0 for i; the diagonal (1, 1) = 1 uses node_1 for both i and j, so it should
     # score differently even though j and value are the same in both cells.
     matrix = SparseTriangularMatrix.empty(d=D, max_value=MAX_VALUE).with_value(0, 1, 1).with_value(1, 1, 1)
-    scores = heuristic_for_matrix(matrix, encoder, model)
+    scores = heuristic_for_matrix(matrix, AdniSignature(encoder), model)
     assert scores[(0, 1)] == 70.0
     # contribution at position 0 = B1[0, node] + B1[0, node_1] + A1[0, node] + A1[0, node_1]
     #                            = 2 + 3 + 1 + 9 = 15. heuristic = 7 * 15 = 105.
@@ -71,5 +71,5 @@ def test_heuristic_for_matrix_only_scores_present_cells():
     encoder = make_internal_encoder()
     model = make_model()
     matrix = SparseTriangularMatrix.empty(d=D, max_value=MAX_VALUE).with_value(0, 1, 1)
-    scores = heuristic_for_matrix(matrix, encoder, model)
+    scores = heuristic_for_matrix(matrix, AdniSignature(encoder), model)
     assert set(scores) == {(0, 1)}

@@ -3,8 +3,9 @@ import pytest
 import torch
 
 from src.adni.fact_to_matrix import _pick_best_neighbours, _set_matrix_entry, derive_matrix_from_fact, \
-    derive_minimal_matrix_from_fact, node_canonical_index
+    derive_minimal_matrix_from_fact
 from src.adni.matrix_to_tree import matrix_to_tree
+from src.adni.signature import AdniSignature
 from src.adni.sparse_triangular_matrix import SparseTriangularMatrix
 from src.encodings.canonical import CanonicalEncoderDecoder
 from src.encodings.noncanonical.identity import IdentityEncoderDecoder
@@ -99,24 +100,6 @@ def get_fact():
     return "P", TYPE_PRED, "positive"
 
 
-class TestNodeCanonicalIndex:
-
-    def test_reads_off_the_node_k_bit(self):
-        model = make_model()
-        trace = make_trace(model)
-        internal_encoder = make_internal_encoder()
-        assert node_canonical_index(1, trace.activations, internal_encoder, d=3) == 0  # P0
-        assert node_canonical_index(2, trace.activations, internal_encoder, d=3) == 1  # P1
-        assert node_canonical_index(3, trace.activations, internal_encoder, d=3) == 2  # P2
-
-    def test_raises_when_no_node_k_bit_is_set(self):
-        model = make_model()
-        trace = make_trace(model)
-        internal_encoder = make_internal_encoder()
-        with pytest.raises(ValueError):
-            node_canonical_index(0, trace.activations, internal_encoder, d=3)  # root has none
-
-
 class TestPickBestNeighbours:
 
     def test_picks_the_argmax_neighbour_per_position(self):
@@ -176,7 +159,7 @@ class TestDeriveMatrixFromFact:
         assert trace.activations[2][root_idx][POSITIVE_POS] > THRESHOLD
 
         matrix = derive_matrix_from_fact(
-            get_fact(), trace, external_encoder, internal_encoder, model, THRESHOLD)
+            get_fact(), trace, external_encoder, AdniSignature(internal_encoder), model, THRESHOLD)
 
         # node_0 (P0, root's winning part_of child) recipient, node_1 (P1, its "1.0" neighbour) sender --
         # matching the real direction the message actually flowed in the trace.
@@ -189,12 +172,12 @@ class TestDeriveMatrixFromFact:
         external_encoder = make_external_encoder()
 
         matrix = derive_matrix_from_fact(
-            get_fact(), trace, external_encoder, internal_encoder, model, THRESHOLD)
+            get_fact(), trace, external_encoder, AdniSignature(internal_encoder), model, THRESHOLD)
 
         # Soundness is checked against every node_k (matrix_to_tree's default), matching
         # matrix_search.check_soundness: every real patient has all d regions present as part_of children
         # of root regardless of what the candidate matrix asserts, so that's the graph to test against.
-        tree = matrix_to_tree(matrix, internal_encoder)
+        tree = matrix_to_tree(matrix, AdniSignature(internal_encoder))
         output_graph = apply_model(tree.as_cd_graph, torch.device("cpu"), model)
         assert output_graph.features[0][POSITIVE_POS].item() >= THRESHOLD
 
@@ -205,7 +188,7 @@ class TestDeriveMatrixFromFact:
         internal_encoder = make_internal_encoder()
         from src.adni.sparse_triangular_matrix import SparseTriangularMatrix
         matrix = SparseTriangularMatrix.empty(d=3, max_value=2)
-        tree = matrix_to_tree(matrix, internal_encoder, included_nodes={0})
+        tree = matrix_to_tree(matrix, AdniSignature(internal_encoder), included_nodes={0})
         output_graph = apply_model(tree.as_cd_graph, torch.device("cpu"), model)
         assert output_graph.features[0][POSITIVE_POS].item() < THRESHOLD
 
@@ -242,7 +225,7 @@ class TestDeriveMatrixFromFact:
         external_encoder = make_external_encoder()
 
         matrix = derive_matrix_from_fact(
-            get_fact(), trace, external_encoder, internal_encoder, model, THRESHOLD)
+            get_fact(), trace, external_encoder, AdniSignature(internal_encoder), model, THRESHOLD)
 
         assert matrix.to_dict() == {(0, 1): 1}
 
@@ -260,7 +243,7 @@ class TestDeriveMatrixFromFact:
         # assertion in derive_matrix_from_fact by picking a low threshold -- we only care that an isolated
         # root doesn't crash the part_of lookup and returns nothing.
         matrix = derive_matrix_from_fact(
-            ("Lonely", TYPE_PRED, "positive"), trace, external_encoder, internal_encoder, model, threshold=-1.0)
+            ("Lonely", TYPE_PRED, "positive"), trace, external_encoder, AdniSignature(internal_encoder), model, threshold=-1.0)
         assert matrix.to_dict() == {}
 
 
@@ -328,7 +311,7 @@ class TestDeriveMinimalMatrixFromFact:
         external_encoder = make_external_encoder()
 
         matrix = derive_matrix_from_fact(
-            get_fact(), trace, external_encoder, internal_encoder, model, THRESHOLD)
+            get_fact(), trace, external_encoder, AdniSignature(internal_encoder), model, THRESHOLD)
         assert matrix.to_dict() == {(0, 1): 1, (0, 2): 2}
 
         for dropped in [(0, 1), (0, 2)]:
@@ -336,7 +319,7 @@ class TestDeriveMinimalMatrixFromFact:
             for cell, value in matrix.to_dict().items():
                 if cell != dropped:
                     reduced = reduced.with_value(*cell, value)
-            tree = matrix_to_tree(reduced, internal_encoder)  # included_nodes=None -> every node_k
+            tree = matrix_to_tree(reduced, AdniSignature(internal_encoder))  # included_nodes=None -> every node_k
             output_graph = apply_model(tree.as_cd_graph, torch.device("cpu"), model)
             assert output_graph.features[0][POSITIVE_POS].item() >= THRESHOLD
 
@@ -348,7 +331,7 @@ class TestDeriveMinimalMatrixFromFact:
         external_encoder = make_external_encoder()
 
         matrix, included_nodes = derive_minimal_matrix_from_fact(
-            get_fact(), trace, external_encoder, internal_encoder, model, THRESHOLD, torch.device("cpu"))
+            get_fact(), trace, external_encoder, AdniSignature(internal_encoder), model, THRESHOLD, torch.device("cpu"))
 
         # (0, 2) ["2.0", the weaker-heuristic edge] is dropped; (0, 1) ["1.0"] alone still suffices.
         assert matrix.to_dict() == {(0, 1): 1}
@@ -362,8 +345,8 @@ class TestDeriveMinimalMatrixFromFact:
         external_encoder = make_external_encoder()
 
         matrix, included_nodes = derive_minimal_matrix_from_fact(
-            get_fact(), trace, external_encoder, internal_encoder, model, THRESHOLD, torch.device("cpu"))
+            get_fact(), trace, external_encoder, AdniSignature(internal_encoder), model, THRESHOLD, torch.device("cpu"))
 
-        tree = matrix_to_tree(matrix, internal_encoder, included_nodes=included_nodes)
+        tree = matrix_to_tree(matrix, AdniSignature(internal_encoder), included_nodes=included_nodes)
         output_graph = apply_model(tree.as_cd_graph, torch.device("cpu"), model)
         assert output_graph.features[0][POSITIVE_POS].item() >= THRESHOLD

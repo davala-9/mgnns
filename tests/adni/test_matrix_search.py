@@ -1,7 +1,7 @@
 import torch
 
-from src.adni.matrix_search import get_successors, greedy_climb, minimise, prune_isolated_nodes, value_order_table
-from src.adni.matrix_to_tree import colour_predicate_for, node_predicate_for
+from src.adni.matrix_search import greedy_climb, minimise, value_order_table
+from src.adni.signature import AdniSignature, colour_predicate_for, node_predicate_for
 from src.adni.sparse_triangular_matrix import SparseTriangularMatrix
 from src.encodings.canonical import CanonicalEncoderDecoder
 from src.model.gnn_architectures import GNN
@@ -54,43 +54,10 @@ def make_model():
 def test_value_order_table_ranks_colour_2_above_colour_1_everywhere():
     encoder = make_internal_encoder()
     model = make_model()
-    table = value_order_table(D, MAX_VALUE, encoder, model)
+    table = value_order_table(AdniSignature(encoder), model)
     for i in range(D):
         for j in range(i, D):
             assert table[i][j] == [2, 1]
-
-
-def test_get_successors_from_empty_matrix_adds_every_cell_and_value():
-    encoder = make_internal_encoder()
-    model = make_model()
-    table = value_order_table(D, MAX_VALUE, encoder, model)
-    matrix = SparseTriangularMatrix.empty(d=D, max_value=MAX_VALUE)
-    successors = list(get_successors(matrix, table))
-    expected = {
-        SparseTriangularMatrix.empty(d=D, max_value=MAX_VALUE).with_value(i, j, v)
-        for i in range(D) for j in range(i, D) for v in (1, 2)
-    }
-    assert len(successors) == 6
-    assert set(successors) == expected
-
-
-def test_get_successors_offers_only_strictly_better_replacements():
-    encoder = make_internal_encoder()
-    model = make_model()
-    table = value_order_table(D, MAX_VALUE, encoder, model)
-
-    # (0, 1) already at the worse value (1): one replace successor (-> 2), plus adding either value to
-    # each of the two still-empty cells (0, 0) and (1, 1).
-    worse_matrix = SparseTriangularMatrix.empty(d=D, max_value=MAX_VALUE).with_value(0, 1, 1)
-    worse_successors = list(get_successors(worse_matrix, table))
-    assert len(worse_successors) == 5
-    assert worse_matrix.with_value(0, 1, 2) in worse_successors
-
-    # (0, 1) already at the best value (2): no replace successor for that cell, only the same four adds.
-    best_matrix = SparseTriangularMatrix.empty(d=D, max_value=MAX_VALUE).with_value(0, 1, 2)
-    best_successors = list(get_successors(best_matrix, table))
-    assert len(best_successors) == 4
-    assert all(s.get(0, 1) == 2 for s in best_successors)
 
 
 # Hand-computed heuristics for this fixture (heuristic = 7 * (matrix_A's node/node_i contribution +
@@ -102,19 +69,19 @@ def test_get_successors_offers_only_strictly_better_replacements():
 def test_greedy_climb_stops_as_soon_as_the_first_move_is_sound():
     encoder = make_internal_encoder()
     model = make_model()
-    table = value_order_table(D, MAX_VALUE, encoder, model)
+    table = value_order_table(AdniSignature(encoder), model)
     matrix = SparseTriangularMatrix.empty(d=D, max_value=MAX_VALUE)
-    result = greedy_climb(matrix, table, encoder, model, check_soundness=lambda m: m.get(1, 1) == 2)
+    result = greedy_climb(matrix, table, AdniSignature(encoder), model, check_soundness=lambda m: m.get(1, 1) == 2)
     assert result.to_dict() == {(1, 1): 2}
 
 
 def test_greedy_climb_takes_the_second_best_move_when_the_first_is_not_enough():
     encoder = make_internal_encoder()
     model = make_model()
-    table = value_order_table(D, MAX_VALUE, encoder, model)
+    table = value_order_table(AdniSignature(encoder), model)
     matrix = SparseTriangularMatrix.empty(d=D, max_value=MAX_VALUE)
     result = greedy_climb(
-        matrix, table, encoder, model,
+        matrix, table, AdniSignature(encoder), model,
         check_soundness=lambda m: m.get(1, 1) == 2 and m.get(0, 1) == 2,
     )
     assert result.to_dict() == {(1, 1): 2, (0, 1): 2}
@@ -123,9 +90,9 @@ def test_greedy_climb_takes_the_second_best_move_when_the_first_is_not_enough():
 def test_greedy_climb_returns_none_when_it_runs_out_of_moves():
     encoder = make_internal_encoder()
     model = make_model()
-    table = value_order_table(D, MAX_VALUE, encoder, model)
+    table = value_order_table(AdniSignature(encoder), model)
     matrix = SparseTriangularMatrix.empty(d=D, max_value=MAX_VALUE)
-    result = greedy_climb(matrix, table, encoder, model, check_soundness=lambda m: False)
+    result = greedy_climb(matrix, table, AdniSignature(encoder), model, check_soundness=lambda m: False)
     assert result is None
 
 
@@ -144,7 +111,7 @@ def _dense_matrix():
 def test_minimise_drops_every_cell_not_needed_for_the_one_that_is():
     encoder = make_internal_encoder()
     model = make_model()
-    result = minimise(_dense_matrix(), encoder, model, check_soundness=lambda m: m.get(1, 1) == 2)
+    result = minimise(_dense_matrix(), AdniSignature(encoder), model, check_soundness=lambda m: m.get(1, 1) == 2)
     assert result.to_dict() == {(1, 1): 2}
 
 
@@ -152,34 +119,14 @@ def test_minimise_keeps_every_cell_that_is_needed():
     encoder = make_internal_encoder()
     model = make_model()
     result = minimise(
-        _dense_matrix(), encoder, model,
+        _dense_matrix(), AdniSignature(encoder), model,
         check_soundness=lambda m: m.get(0, 1) == 2 and m.get(1, 1) == 2,
     )
     assert result.to_dict() == {(0, 1): 2, (1, 1): 2}
 
 
-def test_prune_isolated_nodes_drops_a_node_with_no_incident_entry():
-    matrix = SparseTriangularMatrix.empty(d=3, max_value=1).with_value(0, 1, 1)  # node 2 has no entry
-    included = prune_isolated_nodes(matrix, check_soundness_with_nodes=lambda m, nodes: True)
-    assert included == {0, 1}
-
-
-def test_prune_isolated_nodes_keeps_an_isolated_node_that_is_actually_needed():
-    matrix = SparseTriangularMatrix.empty(d=3, max_value=1).with_value(0, 1, 1)  # node 2 has no entry
-    included = prune_isolated_nodes(matrix, check_soundness_with_nodes=lambda m, nodes: 2 in nodes)
-    assert included == {0, 1, 2}
-
-
-def test_prune_isolated_nodes_never_considers_a_node_with_an_incident_entry():
-    # node 2 has a self-loop entry, so it's never "isolated" -- it must never be offered for removal,
-    # even though check_soundness_with_nodes here would happily allow it.
-    matrix = SparseTriangularMatrix.empty(d=3, max_value=1).with_value(0, 1, 1).with_value(2, 2, 1)
-    included = prune_isolated_nodes(matrix, check_soundness_with_nodes=lambda m, nodes: True)
-    assert included == {0, 1, 2}
-
-
 def test_minimise_keeps_the_weakest_cell_when_it_is_the_one_actually_needed():
     encoder = make_internal_encoder()
     model = make_model()
-    result = minimise(_dense_matrix(), encoder, model, check_soundness=lambda m: m.get(0, 0) == 2)
+    result = minimise(_dense_matrix(), AdniSignature(encoder), model, check_soundness=lambda m: m.get(0, 0) == 2)
     assert result.to_dict() == {(0, 0): 2}
