@@ -4,8 +4,8 @@ from pathlib import Path
 import torch
 
 from src.adni.matrix_search import greedy_climb, minimise, value_order_table
-from src.adni.matrix_to_tree import is_sound, matrix_to_tree, prune_isolated_nodes
-from src.adni.rule_printing import tree_to_rule
+from src.adni.matrix_to_tree import is_sound
+from src.adni.rule_printing import matrix_to_rule
 from src.adni.signature import POSITIVE_PREDICATE, AdniSignature
 from src.adni.sparse_triangular_matrix import SparseTriangularMatrix
 from src.encodings.canonical import CanonicalEncoderDecoder
@@ -27,9 +27,6 @@ if __name__ == "__main__":
     positive_position = signature.positive_pos
     d, max_value = signature.d, signature.max_value
 
-    def check_soundness_with_nodes(matrix: SparseTriangularMatrix, included_nodes) -> bool:
-        return is_sound(matrix, signature, model, device, positive_position, args.threshold, included_nodes)
-
     def check_soundness(matrix: SparseTriangularMatrix) -> bool:
         return is_sound(matrix, signature, model, device, positive_position, args.threshold)
 
@@ -47,10 +44,6 @@ if __name__ == "__main__":
         else:
             print("Minimising the sound matrix...")
             result = minimise(result, signature, model, check_soundness, verbose=True)
-            print("Dropping isolated nodes...")
-            included_nodes = prune_isolated_nodes(result, check_soundness_with_nodes, verbose=True)
-            rule = tree_to_rule(
-                matrix_to_tree(result, signature, included_nodes=included_nodes),
-                internal_encoder, POSITIVE_PREDICATE)
+            rule = matrix_to_rule(result, signature, POSITIVE_PREDICATE)
             print(rule)
             output_file.write(rule + '\n')

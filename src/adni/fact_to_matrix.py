@@ -1,7 +1,7 @@
 import numpy as np
 
 from src.adni.matrix_search import minimise
-from src.adni.matrix_to_tree import is_sound, prune_isolated_nodes
+from src.adni.matrix_to_tree import is_sound
 from src.adni.signature import AdniSignature
 from src.adni.sparse_triangular_matrix import SparseTriangularMatrix
 from src.rule_extraction.fact_explanation import FactContext
@@ -105,19 +105,14 @@ def derive_matrix_from_fact(fact: tuple[str, str, str], trace, external_encoder,
 
 # Shrinks derive_matrix_from_fact's raw matrix down to an actually-minimal sound rule
 def derive_minimal_matrix_from_fact(fact: tuple[str, str, str], trace, external_encoder, signature: AdniSignature,
-                                     model, threshold: float, device) -> tuple[SparseTriangularMatrix, set]:
+                                     model, threshold: float, device) -> SparseTriangularMatrix:
     matrix = derive_matrix_from_fact(fact, trace, external_encoder, signature, model, threshold)
 
     constant_to_index = {name: i for i, name in enumerate(trace.cd_graph.node_names)}
     fact_context = FactContext(fact, external_encoder, signature.internal_encoder, constant_to_index)
     position = fact_context.cd_fact_pred_pos
 
-    def check_soundness_with_nodes(candidate: SparseTriangularMatrix, included_nodes) -> bool:
-        return is_sound(candidate, signature, model, device, position, threshold, included_nodes)
-
     def check_soundness(candidate: SparseTriangularMatrix) -> bool:
         return is_sound(candidate, signature, model, device, position, threshold)
 
-    matrix = minimise(matrix, signature, model, check_soundness)
-    included_nodes = prune_isolated_nodes(matrix, check_soundness_with_nodes)
-    return matrix, included_nodes
+    return minimise(matrix, signature, model, check_soundness)

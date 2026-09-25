@@ -183,12 +183,12 @@ class TestDeriveMatrixFromFact:
 
     def test_dropping_the_value_edge_would_fail_soundness(self):
         # Confirms the fixture's own claim (see make_model's docstring) that the "1.0" message is load
-        # bearing: a tree with only node_0, no value edge, does NOT reach the threshold.
+        # bearing: with every node but no value edge, the tree does NOT reach the threshold.
         model = make_model()
         internal_encoder = make_internal_encoder()
         from src.adni.sparse_triangular_matrix import SparseTriangularMatrix
         matrix = SparseTriangularMatrix.empty(d=3, max_value=2)
-        tree = matrix_to_tree(matrix, AdniSignature(internal_encoder), included_nodes={0})
+        tree = matrix_to_tree(matrix, AdniSignature(internal_encoder))
         output_graph = apply_model(tree.as_cd_graph, torch.device("cpu"), model)
         assert output_graph.features[0][POSITIVE_POS].item() < THRESHOLD
 
@@ -330,12 +330,11 @@ class TestDeriveMinimalMatrixFromFact:
         internal_encoder = make_internal_encoder()
         external_encoder = make_external_encoder()
 
-        matrix, included_nodes = derive_minimal_matrix_from_fact(
+        matrix = derive_minimal_matrix_from_fact(
             get_fact(), trace, external_encoder, AdniSignature(internal_encoder), model, THRESHOLD, torch.device("cpu"))
 
         # (0, 2) ["2.0", the weaker-heuristic edge] is dropped; (0, 1) ["1.0"] alone still suffices.
         assert matrix.to_dict() == {(0, 1): 1}
-        assert included_nodes == {0, 1}  # node_2 (P2) is pruned too: it was never load-bearing
 
     def test_minimal_rule_still_reproduces_positive(self):
         model = make_over_determined_model()
@@ -344,9 +343,9 @@ class TestDeriveMinimalMatrixFromFact:
         internal_encoder = make_internal_encoder()
         external_encoder = make_external_encoder()
 
-        matrix, included_nodes = derive_minimal_matrix_from_fact(
+        matrix = derive_minimal_matrix_from_fact(
             get_fact(), trace, external_encoder, AdniSignature(internal_encoder), model, THRESHOLD, torch.device("cpu"))
 
-        tree = matrix_to_tree(matrix, AdniSignature(internal_encoder), included_nodes=included_nodes)
+        tree = matrix_to_tree(matrix, AdniSignature(internal_encoder))
         output_graph = apply_model(tree.as_cd_graph, torch.device("cpu"), model)
         assert output_graph.features[0][POSITIVE_POS].item() >= THRESHOLD

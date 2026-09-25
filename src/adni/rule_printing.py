@@ -1,3 +1,6 @@
+from src.adni.matrix_to_tree import matrix_to_tree
+from src.adni.signature import AdniSignature
+from src.adni.sparse_triangular_matrix import SparseTriangularMatrix
 from src.rule_extraction.tree_shaped_conjunction import TreeShapedConjunction
 
 
@@ -15,3 +18,9 @@ def tree_to_rule(tree: TreeShapedConjunction, internal_encoder, head_predicate: 
             body_atoms.append(f"<{predicate}>[?{datavar[child_id]},?{datavar[var_id]}]")
     head = f"<{head_predicate}>[?{datavar[0]}]"
     return head + " :- " + ", ".join(body_atoms) + " ."
+
+
+def matrix_to_rule(matrix: SparseTriangularMatrix, signature: AdniSignature, head_predicate: str) -> str:
+    touched = {k for (i, j) in matrix.to_dict() for k in (i, j)}
+    tree = matrix_to_tree(matrix, signature, included_nodes=sorted(touched))
+    return tree_to_rule(tree, signature.internal_encoder, head_predicate)

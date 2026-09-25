@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from src.adni.matrix_to_tree import is_sound, matrix_to_tree, prune_isolated_nodes
+from src.adni.matrix_to_tree import is_sound, matrix_to_tree
 from src.adni.signature import AdniSignature, colour_predicate_for, node_predicate_for
 from src.adni.sparse_triangular_matrix import SparseTriangularMatrix
 from src.encodings.canonical import CanonicalEncoderDecoder
@@ -124,20 +124,11 @@ def make_encoder_with_positive():
     return CanonicalEncoderDecoder(unary_predicates=unary, binary_predicates=binary)
 
 
-def test_is_sound_includes_every_node_by_default():
+def test_is_sound_always_includes_every_node():
     encoder = make_encoder_with_positive()
     model = make_node_0_detector(encoder)
     matrix = SparseTriangularMatrix.empty(2, 1)
     assert is_sound(matrix, AdniSignature(encoder), model, torch.device("cpu"), position=3, threshold=0.5)
-
-
-def test_is_sound_respects_included_nodes():
-    encoder = make_encoder_with_positive()
-    model = make_node_0_detector(encoder)
-    matrix = SparseTriangularMatrix.empty(2, 1)
-    device = torch.device("cpu")
-    assert is_sound(matrix, AdniSignature(encoder), model, device, position=3, threshold=0.5, included_nodes={0})
-    assert not is_sound(matrix, AdniSignature(encoder), model, device, position=3, threshold=0.5, included_nodes={1})
 
 
 @pytest.mark.parametrize("score, expected", [(0.25, False), (0.5, False), (0.75, True)])
@@ -153,25 +144,3 @@ def test_is_sound_requires_a_score_strictly_above_the_threshold(monkeypatch, sco
 
     matrix = SparseTriangularMatrix.empty(2, 1)
     assert is_sound(matrix, AdniSignature(encoder), None, torch.device("cpu"), position=3, threshold=0.5) == expected
-
-
-# --- prune_isolated_nodes ---
-
-def test_prune_isolated_nodes_drops_a_node_with_no_incident_entry():
-    matrix = SparseTriangularMatrix.empty(d=3, max_value=1).with_value(0, 1, 1)  # node 2 has no entry
-    included = prune_isolated_nodes(matrix, check_soundness_with_nodes=lambda m, nodes: True)
-    assert included == {0, 1}
-
-
-def test_prune_isolated_nodes_keeps_an_isolated_node_that_is_actually_needed():
-    matrix = SparseTriangularMatrix.empty(d=3, max_value=1).with_value(0, 1, 1)  # node 2 has no entry
-    included = prune_isolated_nodes(matrix, check_soundness_with_nodes=lambda m, nodes: 2 in nodes)
-    assert included == {0, 1, 2}
-
-
-def test_prune_isolated_nodes_never_considers_a_node_with_an_incident_entry():
-    # node 2 has a self-loop entry, so it's never "isolated" -- it must never be offered for removal,
-    # even though check_soundness_with_nodes here would happily allow it.
-    matrix = SparseTriangularMatrix.empty(d=3, max_value=1).with_value(0, 1, 1).with_value(2, 2, 1)
-    included = prune_isolated_nodes(matrix, check_soundness_with_nodes=lambda m, nodes: True)
-    assert included == {0, 1, 2}

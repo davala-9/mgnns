@@ -1,6 +1,6 @@
 from src.adni.matrix_to_tree import matrix_to_tree
 from src.adni.signature import AdniSignature, colour_predicate_for, node_predicate_for
-from src.adni.rule_printing import tree_to_rule
+from src.adni.rule_printing import matrix_to_rule, tree_to_rule
 from src.adni.sparse_triangular_matrix import SparseTriangularMatrix
 from src.encodings.canonical import CanonicalEncoderDecoder
 
@@ -43,4 +43,16 @@ def test_diagonal_self_loop_uses_one_variable_on_both_sides_of_the_edge():
     rule = tree_to_rule(tree, encoder, "positive")
     assert rule == (
         "<positive>[?X0] :- <part_of>[?X1,?X0], <node>[?X1], <node_0>[?X1], <1.0>[?X1,?X1] ."
+    )
+
+
+# --- matrix_to_rule ---
+
+def test_matrix_to_rule_prints_only_the_regions_the_matrix_touches():
+    # d=3, one entry between node_0 and node_2: node_1 is part of the implicit structure, so it isn't printed.
+    signature = AdniSignature(make_internal_encoder(d=3, max_value=1))
+    matrix = SparseTriangularMatrix.empty(d=3, max_value=1).with_value(0, 2, 1)
+    assert matrix_to_rule(matrix, signature, "positive") == (
+        "<positive>[?X0] :- <part_of>[?X1,?X0], <part_of>[?X2,?X0], "
+        "<node>[?X1], <node_0>[?X1], <1.0>[?X2,?X1], <node>[?X2], <node_2>[?X2] ."
     )
