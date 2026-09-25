@@ -1,6 +1,7 @@
 import os
 import tempfile
 
+import pytest
 import torch
 
 from src.encodings.canonical import CanonicalEncoderDecoder
@@ -46,11 +47,8 @@ def test_get_canonical_equivalent_identity():
 
 
 def test_init_rejects_overlapping_predicates():
-    try:
+    with pytest.raises(AssertionError):
         IdentityEncoderDecoder(unary_predicates=["A"], binary_predicates=["A"])
-        assert False, "expected an AssertionError for overlapping unary/binary predicates"
-    except AssertionError:
-        pass
 
 
 # ------------------------
