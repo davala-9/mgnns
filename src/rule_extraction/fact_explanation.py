@@ -125,6 +125,9 @@ class FactExplainer:
         else:
             head_predicate = fact_context.ent2
 
+        # The optimisations renumber variables, but var_const_idx is keyed by the ids of the basic explanation
+        var_const_idx = {var_id: var_const_idx[source_id] for var_id, source_id in enumerate(rule_body.source_var_ids)}
+
         # Unfold into body via external encoder/decoder
         # This converts a TreeShapedConjunction into a simple list of triples, plus a list of head variables
         rule_body, head = self.external_encoder.unfold_match_ground(

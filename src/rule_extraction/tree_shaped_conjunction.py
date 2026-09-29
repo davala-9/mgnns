@@ -36,12 +36,16 @@ class TreeShapedConjunctionBuilder:
 # Immutable
 class TreeShapedConjunction:
     def __init__(self, n_colours, features = (), levels = (), children = (), parent = (),
-                 typed_constraints: tuple = (), var_types: dict = None):
+                 typed_constraints: tuple = (), var_types: dict = None, source_var_ids: tuple = None):
         self.n_colours = n_colours
         self.features = features
         self.levels = levels
         self.children = children
         self.parent = parent
+        # source_var_ids[i] is the id variable i had in the tree built by TreeShapedConjunctionBuilder that this tree
+        # was cut from (via from_subtree/extract_from_compact, which renumber), so that maps keyed by the built tree's
+        # var ids (e.g. FactExplainer's variable-to-constant map) still apply. The identity for a freshly built tree.
+        self.source_var_ids = source_var_ids if source_var_ids is not None else tuple(range(len(features)))
         # The TypedConstraints this tree was built under, and each var_id's type under every one of them
         # (same order, one type per constraint) -- empty/{} when the tree was built without any. Used by
         # CompactSubTree.get_successors to prune the lattice search (see feature_exclusivity_groups and
@@ -184,7 +188,8 @@ class TreeShapedConjunction:
                 new_children[parent_new_id][self.parent_edge[var_id]] = new_id
 
         return TreeShapedConjunction(self.n_colours, tuple(new_features),
-                                     tuple(new_levels), tuple(new_children), tuple(new_parent))
+                                     tuple(new_levels), tuple(new_children), tuple(new_parent),
+                                     source_var_ids=tuple(self.source_var_ids[var_id] for var_id in compact.var_ids))
 
     # Returns another TreeShapedConjunction corresponding to a subtree given by a list of nodes and its features.
     # This is similar to a compact tree but the node labels are not compact.
@@ -214,7 +219,8 @@ class TreeShapedConjunction:
             for old in order
         ]
         return TreeShapedConjunction(self.n_colours,features=tuple(new_features), levels = tuple(new_level),
-                                     children=tuple(new_edges), parent=tuple(new_parent))
+                                     children=tuple(new_edges), parent=tuple(new_parent),
+                                     source_var_ids=tuple(self.source_var_ids[old] for old in order))
 
     # Returns a new TreeShapedConjunction, identical to this one except that var_id's feature is replaced.
     def with_feature(self, var_id: int, feature: BitSet) -> "TreeShapedConjunction":
@@ -222,7 +228,7 @@ class TreeShapedConjunction:
             raise ValueError(f"variable {var_id} does not appear to exist in the tree")
         new_features = self.features[:var_id] + (feature,) + self.features[var_id + 1:]
         return TreeShapedConjunction(self.n_colours, new_features, self.levels, self.children, self.parent,
-                                     self.typed_constraints, self.var_types)
+                                     self.typed_constraints, self.var_types, self.source_var_ids)
 
     def __len__(self):
         return len(self.features)

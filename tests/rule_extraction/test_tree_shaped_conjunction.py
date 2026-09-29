@@ -185,6 +185,11 @@ def test_extract_from_compact_root_only():
     assert len(result) == 1
     assert result.parent == (-1,)
 
+def test_extract_from_compact_records_source_var_ids():
+    tree, (root, child1, child2, grandchild) = build_multi_node_tree()
+    compact = CompactSubTree(var_ids=(root, child2), masks=(BitSet.from_subset(1, {0}), BitSet.from_subset(1, {0})))
+    assert tree.extract_from_compact(compact).source_var_ids == (root, child2)  # child2 is renumbered 2 -> 1
+
 
 # --- CompactSubTree.get_successors ---
 
@@ -439,6 +444,23 @@ def test_from_subtree_root_alone_has_no_parent():
     assert len(result) == 1
     assert result.parent == (-1,)
 
+def test_built_tree_source_var_ids_are_the_identity():
+    tree, _ = build_multi_node_tree()
+    assert tree.source_var_ids == (0, 1, 2, 3)
+
+def test_from_subtree_records_source_var_ids():
+    tree, (root, child1, child2, grandchild) = build_multi_node_tree()
+    result = tree.from_subtree([child2], [BitSet.from_subset(5, {2})])
+    assert result.source_var_ids == (root, child2)  # child2 is renumbered 2 -> 1
+
+# Regression: FactExplainer grounds the final rule with a map keyed by the built tree's var ids, so source_var_ids
+# must refer back to the built tree even after several renumberings (e.g. an optimisation, then minimisation).
+def test_source_var_ids_compose_across_renumberings():
+    tree, (root, child1, child2, grandchild) = build_multi_node_tree()
+    sub = tree.from_subtree([root, child2], [BitSet.from_subset(5, {0}), BitSet.from_subset(5, {2})])
+    compact = CompactSubTree(var_ids=(0, 1), masks=(BitSet.from_subset(1, {0}), BitSet.from_subset(1, {0})))
+    assert sub.extract_from_compact(compact).source_var_ids == (root, child2)
+
 def test_from_subtree_explicit_ancestor_and_descendant():
     tree, (root, child1, child2, grandchild) = build_multi_node_tree()
     result = tree.from_subtree([root, grandchild],
@@ -456,6 +478,11 @@ def test_with_feature_replaces_only_the_target_variable():
     assert result.features[child1] == new_feature
     assert result.features[root] == tree.features[root]
     assert result.features[grandchild] == tree.features[grandchild]
+
+def test_with_feature_keeps_source_var_ids():
+    tree, (root, child1, child2, grandchild) = build_multi_node_tree()
+    sub = tree.from_subtree([child2], [BitSet.from_subset(5, {2})])
+    assert sub.with_feature(1, BitSet.from_subset(5, {4})).source_var_ids == (root, child2)
 
 def test_with_feature_does_not_mutate_the_original_tree():
     tree, (root, child1, *_) = build_multi_node_tree()
