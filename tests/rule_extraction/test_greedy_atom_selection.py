@@ -44,3 +44,14 @@ def test_keeps_adding_until_sound():
 
 def test_returns_none_if_no_prefix_is_sound():
     assert add_atoms_until_sound(root_and_child_tree(), [(1, 0)], DEVICE, self_only_model(), THRESHOLD, 0) is None
+
+
+# Regression: when the biases alone derive the head, the empty body is sound and must be returned, even with no
+# atoms to add (previously the empty body was never checked, so this returned None).
+def test_returns_the_empty_body_when_the_biases_alone_derive_the_head():
+    model = self_only_model()
+    with torch.no_grad():
+        model.lin_self_2.bias[0] = 20.0  # output = sigmoid(20 - 10) > THRESHOLD without any atom
+    result = add_atoms_until_sound(root_and_child_tree(), [], DEVICE, model, THRESHOLD, 0)
+    assert len(result) == 1
+    assert result.features[0].is_empty()
