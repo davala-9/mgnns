@@ -140,7 +140,7 @@ def save_predictions(ef, predictions):
             output2.write("{}\t{}\t{}\t{}\n".format(s, p, o, score))
 
 def extract_program(ef, device, model, threshold, external_encoder, internal_encoder, predicate=None):
-    print("Computing full equivalent program...")
+    print(f"Computing full equivalent program with threshold {threshold}...")
     program_file = ef / "program.txt"
     program_extractor = EquivalentProgramExtractor(device, model, threshold, external_encoder, internal_encoder)
     predicate_positions = None
@@ -173,10 +173,10 @@ if __name__ == "__main__":
     predictions, test_graph_dataset, trace = test(cfg.data_dir, external_encoder, internal_encoder, model, cfg, device,
                                                   exp_folder)
     save_predictions(exp_folder, predictions)
+    extraction_threshold = optimal_threshold(predictions, cfg.data_dir / "test_pos.tsv", cfg.data_dir / "test_neg.tsv")
     if not args.skip_program:
-        extract_program(exp_folder, device, model, cfg.derivation_threshold, external_encoder, internal_encoder)
-    explanation_threshold = optimal_threshold(predictions, cfg.data_dir / "test_pos.tsv", cfg.data_dir / "test_neg.tsv")
-    explain_facts(exp_folder, predictions, device, model, explanation_threshold, trace, external_encoder,
+        extract_program(exp_folder, device, model, extraction_threshold, external_encoder, internal_encoder)
+    explain_facts(exp_folder, predictions, device, model, extraction_threshold, trace, external_encoder,
                   internal_encoder, test_graph_dataset)
 
 # TODO: Separate responsibilities better in the test method.
