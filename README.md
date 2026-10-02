@@ -83,7 +83,7 @@ clamping: 0                               # [CURRENTLY UNSUPPORTED] must be non-
 ```
 
 `encoding_scheme: canonical` uses the canonical encoding directly. `iclr22` uses the encoding from our ICLR 2022
-paper [1], which also supports binary target predicates. `models_dir` and `exp_dir` must exist.
+paper [1], which also supports binary target predicates.
 
 ## Training a model
 
@@ -91,9 +91,8 @@ paper [1], which also supports binary target predicates. `models_dir` and `exp_d
 python -m src.run.train configs/WN18RRv1_maxmax.yaml
 ```
 
-This trains a model and saves it in a new folder in `models_dir`, named after the dataset folder, the two
-aggregation functions and the start time (e.g. `models/WN18RRv1_maxmax_20261002_084308`). It prints the folder's
-path last. The folder contains:
+This trains a model and saves it in a new folder in `models_dir`, named after the dataset folder, the aggregation
+functions and the start time (e.g. `models/WN18RRv1_maxmax_20261002_084308`), containing:
 
 ```
 model_name
@@ -108,26 +107,24 @@ model_name
 
 ## Running experiments
 
-Every other script runs one kind of experiment on a trained model, given with `--model [model folder]`. Each run
-creates a new folder in the `exp_dir` of the model's configuration, named after the dataset folder, the experiment
-and the start time (e.g. `experiments/WN18RRv1_evaluate_20261002_085245`). Besides the experiment's output, the
-folder contains `run.yaml`, which records the experiment, the model folder, the full command, the git commit the code
-was run from (and whether there were uncommitted changes), and any values the run chose itself.
-
-Scripts that need a fact derivation threshold (theta in the papers) take it as `--threshold`, between 0 and 1: a fact
-is derived when its score is above it.
-
-### Evaluating a model
+Every other script runs an experiment on a trained model, e.g.:
 
 ```bash
 python -m src.run.evaluate --model models/WN18RRv1_maxmax_20261002_084308 --threshold 0.000000001
 ```
 
-This evaluates the model on the validation and test data, extracts a program from it, and explains its
-top-scoring test predictions. The program and the explanations use the threshold that maximises the F1 score over the
-test data (recorded in `run.yaml` as `extraction_threshold`), not `--threshold`. `--skip-program` skips the (slow)
-program extraction. `run_all.sh [threshold]` trains a model for every file in `configs/` and evaluates it (the ADNI
-configs will fail unless you have the ADNI data; see below). The experiment folder contains:
+Each run creates a folder in the `exp_dir` of the model's configuration, named after the dataset folder, the
+experiment and the start time (e.g. `experiments/WN18RRv1_evaluate_20261002_085245`). Its `run.yaml` records the
+model, the command and the git commit used. `--threshold` (theta in the papers, between 0 and 1) is the score above
+which a fact is derived.
+
+### Evaluating a model
+
+`src.run.evaluate` evaluates the model on the validation and test data, extracts a program from it, and explains its
+top-scoring test predictions. The program and explanations use the threshold that maximises F1 on the test data
+(saved in `run.yaml`). `--skip-program` skips the (slow) program extraction. `run_all.sh [threshold]` trains and
+evaluates a model for every file in `configs/` (the ADNI configs will fail unless you have the ADNI data; see below).
+The experiment folder contains:
 
 ```
 experiment_name
