@@ -22,7 +22,8 @@ dist/
 .idea/
 *.swp
 
-# Experiment outputs and old code kept locally
+# Trained models, experiment outputs and old code kept locally
+models/
 experiments/
 src/old/
 

@@ -1,4 +1,4 @@
-from src.run.run_experiment import optimal_threshold
+from src.run.evaluate import optimal_threshold
 
 
 def write_examples(path, facts):

@@ -23,9 +23,10 @@ All commands below are run from the repository root, as modules (`python -m src.
 
 ```
 .
-├── configs        # Experiment configuration files (see "Configuration" below)
+├── configs        # Model configuration files (see "Configuration" below)
 ├── data           # Dataset folders (see "Data format" below)
-├── experiments    # One output folder per experiment run
+├── models         # One folder per trained model
+├── experiments    # One output folder per experiment run on a trained model
 ├── src            # The implementation (see "Code map" below)
 └── tests          # Unit tests, mirroring the layout of src
 ```
@@ -67,46 +68,70 @@ were used to build some of the datasets in `data/` from other formats.
 
 ## Configuration
 
-An experiment is described by a YAML file, e.g. `configs/WN18RRv1_maxmax.yaml`. Every key is required:
+A model is described by a YAML file, e.g. `configs/WN18RRv1_maxmax.yaml`. Every key is required:
 
 ```yaml
 data_dir: ./data/link_prediction/WN18RRv1 # the dataset folder
-exp_dir: ./experiments                    # where the experiment's output folder is created
+models_dir: ./models                      # where the model's folder is created when it is trained
+exp_dir: ./experiments                    # where the folders of experiments on the model are created
 use_dummies: false                        # (iclr22 only) add dummy constants to the training graph to discourage false positives
 encoding_scheme: iclr22                   # canonical | iclr22
 agg_function_1: max                       # aggregation in layer 1: max | sum
 agg_function_2: max                       # aggregation in layer 2: max | sum
-derivation_threshold: 0.000000001         # threshold (theta in the papers), between 0 and 1, above which a fact is derived
 non_negative_weights: true                # clamp the weight matrices to be non-negative after each training step (monotonicity)
 clamping: 0                               # [CURRENTLY UNSUPPORTED] must be non-negative
 ```
 
 `encoding_scheme: canonical` uses the canonical encoding directly. `iclr22` uses the encoding from our ICLR 2022
-paper [1], which also supports binary target predicates.
+paper [1], which also supports binary target predicates. `models_dir` and `exp_dir` must exist.
 
-## Running an experiment
+## Training a model
 
 ```bash
-python -m src.run.run_experiment configs/WN18RRv1_maxmax.yaml
+python -m src.run.train configs/WN18RRv1_maxmax.yaml
 ```
 
-This trains a model, evaluates it on the validation and test data, extracts a program from it, and explains its
-top-scoring test predictions. `run_all.sh` does this for every file in `configs/` (the ADNI configs will fail
-unless you have the ADNI data; see below). Options:
+This trains a model and saves it in a new folder in `models_dir`, named after the dataset folder, the two
+aggregation functions and the start time (e.g. `models/WN18RRv1_maxmax_20261002_084308`). It prints the folder's
+path last. The folder contains:
 
-- `--load-model [experiment folder]` skips training and loads the model and encoders from a previous experiment. The
-  loaded model's parameters are not checked against the current configuration, so make sure they match.
-- `--skip-program` skips the (slow) program extraction.
+```
+model_name
+├── checkpoints                  # model snapshots saved during training
+├── config.yaml                  # a copy of the configuration used
+├── external_encoder.tsv
+├── internal_encoder.tsv
+└── model.pt
+```
 
-Each run creates a folder in `exp_dir` named after the dataset folder and the start time, containing:
+`external_encoder.tsv` and `internal_encoder.tsv` are the two encoders (see "Code map" below).
+
+## Running experiments
+
+Every other script runs one kind of experiment on a trained model, given with `--model [model folder]`. Each run
+creates a new folder in the `exp_dir` of the model's configuration, named after the dataset folder, the experiment
+and the start time (e.g. `experiments/WN18RRv1_evaluate_20261002_085245`). Besides the experiment's output, the
+folder contains `run.yaml`, which records the experiment, the model folder, the full command, the git commit the code
+was run from (and whether there were uncommitted changes), and any values the run chose itself.
+
+Scripts that need a fact derivation threshold (theta in the papers) take it as `--threshold`, between 0 and 1: a fact
+is derived when its score is above it.
+
+### Evaluating a model
+
+```bash
+python -m src.run.evaluate --model models/WN18RRv1_maxmax_20261002_084308 --threshold 0.000000001
+```
+
+This evaluates the model on the validation and test data, extracts a program from it, and explains its
+top-scoring test predictions. The program and the explanations use the threshold that maximises the F1 score over the
+test data (recorded in `run.yaml` as `extraction_threshold`), not `--threshold`. `--skip-program` skips the (slow)
+program extraction. `run_all.sh [threshold]` trains a model for every file in `configs/` and evaluates it (the ADNI
+configs will fail unless you have the ADNI data; see below). The experiment folder contains:
 
 ```
 experiment_name
-├── checkpoints                  # model snapshots saved during training
-├── [config file].yaml           # a copy of the configuration used
-├── external_encoder.tsv
-├── internal_encoder.tsv
-├── model.pt
+├── run.yaml
 ├── valid_metrics.txt
 ├── test_metrics.txt
 ├── predicted_triples.tsv
@@ -115,14 +140,12 @@ experiment_name
 └── explanations.txt
 ```
 
-- `external_encoder.tsv` and `internal_encoder.tsv` are the two encoders (see "Code map" below).
-  `checkpoints`, `model.pt` and the encoder files are only written when the model is trained, not when it is loaded.
 - `valid_metrics.txt` and `test_metrics.txt` give precision, recall, accuracy and F1 at a range of thresholds, plus
   the area under the precision-recall curve.
 - `predicted_triples.tsv` lists the facts the model derives on the test graph, from highest to lowest score.
   `predicted_triples_scored.tsv` is the same with each fact's score (its value in the model's last layer).
 - `program.txt` is the extracted program, one rule per head predicate and subtree found (see `full_program.py`).
-- `explanations.txt` lists the highest-scoring test predictions (`N_FACTS_TO_EXPLAIN` in `run_experiment.py`),
+- `explanations.txt` lists the highest-scoring test predictions (`N_FACTS_TO_EXPLAIN` in `evaluate.py`),
   each followed by a rule that explains it.
 
 ### Rule syntax
@@ -137,10 +160,10 @@ Rules are written as `head :- body .`, with atoms `<predicate>[?X]` (unary) or `
 
 ### Extracting rules from a saved model
 
-To run only the program extraction on a model from a previous experiment:
+To run only the program extraction (experiment `extract-rules`, which writes `program.txt`):
 
 ```bash
-python -m src.run.extract_rules [experiment folder] [threshold] [output folder] [canonical|iclr22] [--predicate P]
+python -m src.run.extract_rules --model [model folder] --threshold [threshold] [--predicate P]
 ```
 
 `--predicate` restricts extraction to rules whose head is `P`.
@@ -156,10 +179,10 @@ candidate rule body is a d x d upper-triangular matrix whose cell (i, j) holds t
 regions i and j (or 0 for no edge). To search for a sound rule for `positive`:
 
 ```bash
-python -m src.run.extract_adni_rules [experiment folder] [threshold] [output folder]
+python -m src.run.extract_adni_rules --model [model folder] --threshold [threshold]
 ```
 
-This writes the rule to `[output folder]/program.txt`.
+This runs experiment `adni-rules`, which writes the rule to `program.txt` in its experiment folder.
 
 ## Code map
 
@@ -193,7 +216,8 @@ Rule extraction (`src/rule_extraction/`):
 - `fact_explanation.py`: `FactExplainer`, which explains one prediction: it builds a rule body grounded in the
   input graph, then shrinks it with Optimisations 1–3 (`rule_optimisation_*.py`).
 
-Everything else: `src/config/` (reads the YAML configuration), `src/run/` (the scripts above, training and metrics),
+Everything else: `src/config/` (reads the YAML configuration), `src/run/` (the scripts above, training, metrics, and
+`folders.py`, which creates and reads model and experiment folders),
 `src/datalog/` (parsing, writing and applying rules), `src/utils/` (`BitSet` and small helpers).
 
 ## Tests

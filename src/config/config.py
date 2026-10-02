@@ -1,3 +1,4 @@
+import argparse
 import yaml
 from enum import Enum
 from pathlib import Path
@@ -40,14 +41,27 @@ def _require_bool(data: dict, key: str) -> bool:
     return value
 
 
-class ExperimentConfig:
+# A fact derivation threshold given on the command line (argparse type): a float between 0 and 1.
+def threshold_argument(value: str) -> float:
+    try:
+        result = float(value)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(f"threshold value must be a float, got {value!r}") from e
+    if not 0 <= result <= 1:
+        raise argparse.ArgumentTypeError(f"threshold value must be between 0 and 1, got {result!r}")
+    return result
+
+
+# Describes a model: the data it is trained on, its architecture and training options, and where the folders of the
+# models trained with it, and of the experiments run on those models, are created.
+class ModelConfig:
 
     data_dir: Path  # Folder with the specific dataset with all training, validation, and test data.
-    exp_dir: Path  # Folder where all experiment folders are stored (we will create a new experiment folder in here)
+    models_dir: Path  # Folder where all model folders are stored (training creates a new model folder in here)
+    exp_dir: Path  # Folder where all experiment folders are stored (each experiment creates a new folder in here)
     encoding_scheme: EncoderType  # Encoding/decoding scheme (canonical or iclr22)
     agg_function_1: AggregationType  # Aggregation functions for layer 1
     agg_function_2: AggregationType  # Aggregation functions for layer 2
-    derivation_threshold: float # Model threshold for derivation; must be between 0 and 1
     use_dummies: bool  # Use dummy nodes during training (this is a training optimisation that sometimes helps)
     clamping: float  # Clamp weights whose absolute value is smaller than this to 0. [CURRENTLY UNSUPPORTED]
     non_negative_weights: bool  # Use only non-negative weights in the model's matrices.
@@ -62,6 +76,11 @@ class ExperimentConfig:
             raise ValueError(f"data path is not an existing folder: {data_path}")
         self.data_dir = data_path
 
+        models_path = Path(_require(data, "models_dir"))
+        if not models_path.is_dir():
+            raise ValueError(f"models path is not an existing folder: {models_path}")
+        self.models_dir = models_path
+
         exp_path = Path(_require(data, "exp_dir"))
         if not exp_path.is_dir():
             raise ValueError(f"experiment path is not an existing folder: {exp_path}")
@@ -70,10 +89,6 @@ class ExperimentConfig:
         self.encoding_scheme = _require_enum(data, "encoding_scheme", EncoderType, "encoder type")
         self.agg_function_1 = _require_enum(data, "agg_function_1", AggregationType, "aggregation function")
         self.agg_function_2 = _require_enum(data, "agg_function_2", AggregationType, "aggregation function")
-
-        self.derivation_threshold = _require_float(data, "derivation_threshold")
-        if not 0 <= self.derivation_threshold <= 1:
-            raise ValueError(f"threshold value must be between 0 and 1, got {self.derivation_threshold!r}")
 
         self.clamping = _require_float(data, "clamping")
         if self.clamping < 0:

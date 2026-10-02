@@ -1,11 +1,17 @@
+import argparse
 import torch
 from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader
 import os.path
 from src.encodings.canonical import CanonicalEncoderDecoder
-from src.config.config import ExperimentConfig
+from src.encodings.noncanonical.identity import IdentityEncoderDecoder
+from src.encodings.noncanonical.iclr22 import ICLREncoderDecoder
+from src.config.config import EncoderType, ModelConfig
 from src.model.cd_graph import CDGraph
-from src.utils.utils import TYPE_PRED
+from src.model.gnn_architectures import GNN
+from src.run.folders import create_model_folder
+from src.utils.data_parser import parse
+from src.utils.utils import TYPE_PRED, check, load_predicates
 
 # Training hyperparameters.
 LEARNING_RATE = 0.01
@@ -29,8 +35,8 @@ def build_training_labels(cd_graph: CDGraph, internal_encoder: CanonicalEncoderD
     return train_y
 
 
-def train(cfg: ExperimentConfig, device, internal_encoder: CanonicalEncoderDecoder, model,
-          cd_graph: CDGraph, train_examples, experiment_folder) :
+def train(cfg: ModelConfig, device, internal_encoder: CanonicalEncoderDecoder, model,
+          cd_graph: CDGraph, train_examples, model_folder) :
 
     train_y = build_training_labels(cd_graph, internal_encoder, train_examples)
 
@@ -47,7 +53,7 @@ def train(cfg: ExperimentConfig, device, internal_encoder: CanonicalEncoderDecod
     # Select Adam as the optimisation algorithm
     optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
 
-    checkpoints_folder = experiment_folder / "checkpoints"
+    checkpoints_folder = model_folder / "checkpoints"
     if not os.path.exists(checkpoints_folder):
         os.makedirs(checkpoints_folder)
 
@@ -121,5 +127,46 @@ def train(cfg: ExperimentConfig, device, internal_encoder: CanonicalEncoderDecod
             num_bad_iterations = 0
             min_loss = loss
 
-    torch.save(model, experiment_folder / "model.pt")
+    torch.save(model, model_folder / "model.pt")
 
+# Creates the encoders for cfg's dataset and saves them into model_folder.
+def setup_encoders(cfg: ModelConfig, model_folder):
+    print("Creating Encoder-Decoders...")
+    dbp, dup = load_predicates(check(cfg.data_dir / "predicates.csv", "Predicates"))
+    if cfg.encoding_scheme == EncoderType.ICLR22:
+        external_encoder = ICLREncoderDecoder(load_from_document=None,
+                                              unary_predicates=dup,
+                                              binary_predicates=dbp)
+    else: # Default external encoding is the IdentityEncoder, which encodes each fact as itself
+        external_encoder = IdentityEncoderDecoder(load_from_document=None,
+                                                  unary_predicates=dup,
+                                                  binary_predicates=dbp)
+    internal_encoder = CanonicalEncoderDecoder(load_from_document=None,
+                                               unary_predicates=external_encoder.canonical_unary_predicates,
+                                               binary_predicates=external_encoder.canonical_binary_predicates)
+    external_encoder.save_to_file(model_folder / 'external_encoder.tsv')
+    internal_encoder.save_to_file(model_folder / 'internal_encoder.tsv')
+    return external_encoder, internal_encoder
+
+# Trains a model as described by a configuration file, in a new model folder. The folder's path is printed last.
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("config_file", help='Path of the configuration file describing the model to train.')
+    args = parser.parse_args()
+    cfg = ModelConfig(check(args.config_file, "configuration"))
+    model_folder = create_model_folder(cfg, args.config_file)
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    external_encoder, internal_encoder = setup_encoders(cfg, model_folder)
+
+    print("Training...")
+    # TODO: sanity check - warn if the training data contains any predicates out of the signature.
+    graph_dataset = parse(check(cfg.data_dir / "train_graph.tsv", "Training graph"))
+    cd_dataset = external_encoder.encode_dataset(graph_dataset, use_dummy_constants=cfg.use_dummies)
+    cd_graph = internal_encoder.encode_dataset(cd_dataset)
+    train_examples_dataset = parse(check(cfg.data_dir / "train_pos.tsv", "Training positive examples"))
+    cd_train_examples = external_encoder.encode_dataset(train_examples_dataset)
+    model = GNN(feature_dimension=cd_graph.delta, num_edge_colours=cd_graph.col_size,
+                aggregation_1=cfg.agg_function_1, aggregation_2=cfg.agg_function_2).to(device)
+    train(cfg=cfg, device=device, internal_encoder=internal_encoder, model=model, cd_graph=cd_graph,
+          train_examples=cd_train_examples, model_folder=model_folder)
+    print(model_folder)
