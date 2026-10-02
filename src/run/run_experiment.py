@@ -10,7 +10,7 @@ from src.config.config import EncoderType, ExperimentConfig
 from src.model.gnn_transformation import apply_gnn_transformation
 from src.utils.utils import check, load_predicates
 from src.run.train import train
-from src.run.compute_metrics import compute_metrics
+from src.run.compute_metrics import compute_metrics, f1score, THRESHOLDS
 from src.rule_extraction.fact_explanation import FactExplainer
 from src.model.gnn_architectures import GNN
 from src.model.cd_graph import TraceCollector
@@ -114,6 +114,17 @@ def test(dd, external_encoder, internal_encoder, model, exp_cfg, device, ef):
     compute_metrics(predictions, dd / "test_pos.tsv", dd / "test_neg.tsv", ef / "test_metrics.txt")
     return predictions, test_graph_dataset, trace
 
+# The threshold (among those reported in the metrics file) with the highest F1 score over the given examples;
+# ties go to the smallest such threshold.
+def optimal_threshold(predictions, positive_examples, negative_examples):
+    positive_scores = [predictions.get(fact, 0) for fact in parse(check(positive_examples, "Positive examples"))]
+    negative_scores = [predictions.get(fact, 0) for fact in parse(check(negative_examples, "Negative examples"))]
+    def f1_at(threshold):
+        tp = sum(score > threshold for score in positive_scores)
+        fp = sum(score > threshold for score in negative_scores)
+        return f1score(tp, fp, len(positive_scores) - tp)
+    return max(THRESHOLDS, key=f1_at)
+
 def save_predictions(ef, predictions):
     derivations_file = ef / "predicted_triples.tsv"
     derivations_file_scored = ef / "predicted_triples_scored.tsv"
@@ -138,11 +149,12 @@ def extract_program(ef, device, model, threshold, external_encoder, internal_enc
     program_extractor.compute_all_upper_bounds(predicate_positions)
     program_extractor.get_all_rules(program_file, PROGRAM_EXTRACTION_TIME_BUDGET_SECONDS, predicate_positions)
 
-def explain_facts(ef,predictions,device,model,cfg,trace,external_encoder, internal_encoder, test_graph_dataset):
-    print("Computing prediction explanations...")
+def explain_facts(ef,predictions,device,model,threshold,trace,external_encoder, internal_encoder, test_graph_dataset):
+    print(f"Computing prediction explanations with threshold {threshold}...")
     explanations_file = ef / "explanations.txt"
-    sorted_predictions = sorted(predictions, key=predictions.get, reverse=True)
-    explainer = FactExplainer(device, model, cfg.derivation_threshold, trace, external_encoder, internal_encoder,
+    sorted_predictions = sorted((fact for fact in predictions if predictions[fact] > threshold),
+                                key=predictions.get, reverse=True)
+    explainer = FactExplainer(device, model, threshold, trace, external_encoder, internal_encoder,
                               test_graph_dataset)
     with open(explanations_file, 'w') as output:
         for fact in sorted_predictions[:N_FACTS_TO_EXPLAIN]:
@@ -163,6 +175,8 @@ if __name__ == "__main__":
     save_predictions(exp_folder, predictions)
     if not args.skip_program:
         extract_program(exp_folder, device, model, cfg.derivation_threshold, external_encoder, internal_encoder)
-    explain_facts(exp_folder,predictions,device,model,cfg,trace,external_encoder, internal_encoder, test_graph_dataset)
+    explanation_threshold = optimal_threshold(predictions, cfg.data_dir / "test_pos.tsv", cfg.data_dir / "test_neg.tsv")
+    explain_facts(exp_folder, predictions, device, model, explanation_threshold, trace, external_encoder,
+                  internal_encoder, test_graph_dataset)
 
 # TODO: Separate responsibilities better in the test method.
